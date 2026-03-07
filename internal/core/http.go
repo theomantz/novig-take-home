@@ -25,6 +25,13 @@ func NewHandler(svc *Service, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("/snapshot", func(w http.ResponseWriter, _ *http.Request) {
 		shared.WriteJSON(w, http.StatusOK, svc.Snapshot())
 	})
+	mux.HandleFunc("/replicas/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		shared.WriteJSON(w, http.StatusOK, svc.ReplicaStatuses())
+	})
 	mux.HandleFunc("/internal/events", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -38,6 +45,28 @@ func NewHandler(svc *Service, logger *slog.Logger) http.Handler {
 		}
 		svc.IngestSignal(in)
 		shared.WriteJSON(w, http.StatusAccepted, map[string]any{"status": "accepted"})
+	})
+	mux.HandleFunc("/internal/replicas/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var in ReplicaHeartbeat
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			shared.WriteError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if in.ReplicaID == "" {
+			shared.WriteError(w, http.StatusBadRequest, "replica_id is required")
+			return
+		}
+
+		svc.RecordReplicaHeartbeat(in)
+		shared.WriteJSON(w, http.StatusAccepted, map[string]any{
+			"status":     "accepted",
+			"replica_id": in.ReplicaID,
+		})
 	})
 	mux.HandleFunc("/internal/scenarios/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

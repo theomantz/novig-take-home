@@ -11,7 +11,8 @@ It models a volatility circuit breaker using **bet-flow signals** (not odds/pric
   - Emits ordered replication events (`seq`, `event_id`)
   - Persists event log in **in-memory SQLite**
   - Pushes events via **SSE** (`/stream`)
-  - Serves snapshot (`/snapshot`) and scenario/injection endpoints
+  - Ingests replica heartbeats and classifies replica health (`healthy|stale|offline`)
+  - Serves snapshot (`/snapshot`), replica health (`/replicas/status`), and scenario/injection endpoints
 - `replica`: follower
   - Consumes SSE from core (push-based, no polling loop for replication)
   - Ensures at-least-once consumption + idempotent dedupe by `event_id`
@@ -77,7 +78,9 @@ Notes:
 
 - `GET /stream?from_seq=<n>` (SSE stream)
 - `GET /snapshot`
+- `GET /replicas/status`
 - `POST /internal/events`
+- `POST /internal/replicas/heartbeat`
 - `POST /internal/scenarios/{name}` where `{name}` is `spike` or `normalize`
 - `GET /healthz`
 
@@ -89,6 +92,32 @@ Notes:
 - `GET /replica/status`
 - `GET /healthz`
 
+## Replica Health Model
+
+Replica processes post periodic heartbeats to core (`POST /internal/replicas/heartbeat`) with:
+
+- `replica_id`
+- `connected` (whether replica is currently connected to `/stream`)
+- `last_applied_seq`
+- `core_last_seq` (highest sequence observed by replica)
+- `last_sync_at`
+
+Core computes per-replica health in `/replicas/status` using:
+
+- `healthy`: heartbeat age < stale threshold and replica reports `connected=true`
+- `stale`: heartbeat age >= stale threshold and < offline threshold
+- `offline`: heartbeat age >= offline threshold or replica reports `connected=false`
+
+Defaults:
+
+- stale threshold: `5s` (`REPLICA_STALE_AFTER_MS`)
+- offline threshold: `15s` (`REPLICA_OFFLINE_AFTER_MS`)
+
+Replica heartbeat cadence defaults to `2s` and is tunable via:
+
+- `REPLICA_HEARTBEAT_INTERVAL_MS`
+- `REPLICA_HEARTBEAT_TIMEOUT_MS`
+
 ## Data Flow and Consistency
 
 1. Core ingests synthetic/manual bet-flow signals.
@@ -98,6 +127,8 @@ Notes:
 5. Replica dedupes by `event_id` using `applied_events` table.
 6. Replica applies only if `seq == last_applied_seq + 1`.
 7. On sequence mismatch, replica fetches `/snapshot`, replaces local state, updates checkpoint, then resumes stream.
+8. Replica posts heartbeat reports to core on a fixed interval.
+9. Core tracks liveness/lag and exposes consolidated replica health from `/replicas/status`.
 
 ### Delivery semantics
 
@@ -168,6 +199,7 @@ curl http://127.0.0.1:8082/markets/market-news-001
 curl -X POST http://127.0.0.1:8080/internal/scenarios/normalize
 curl http://127.0.0.1:8081/replica/status
 curl http://127.0.0.1:8082/replica/status
+curl http://127.0.0.1:8080/replicas/status
 ```
 
 ## Testing
