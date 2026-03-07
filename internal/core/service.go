@@ -15,12 +15,14 @@ import (
 )
 
 type ServiceConfig struct {
-	Breaker         domain.BreakerConfig
-	TickInterval    time.Duration
-	WindowDuration  time.Duration
-	DefaultMarketID string
-	Logger          *slog.Logger
-	Now             func() time.Time
+	Breaker             domain.BreakerConfig
+	TickInterval        time.Duration
+	WindowDuration      time.Duration
+	DefaultMarketID     string
+	ReplicaStaleAfter   time.Duration
+	ReplicaOfflineAfter time.Duration
+	Logger              *slog.Logger
+	Now                 func() time.Time
 }
 
 type signalPoint struct {
@@ -38,6 +40,7 @@ type Service struct {
 	lastSeq      int64
 	markets      map[string]domain.MarketState
 	signalWindow map[string][]signalPoint
+	replicas     map[string]replicaHealthRecord
 }
 
 func NewService(store *EventStore, cfg ServiceConfig) (*Service, error) {
@@ -52,6 +55,15 @@ func NewService(store *EventStore, cfg ServiceConfig) (*Service, error) {
 	}
 	if cfg.DefaultMarketID == "" {
 		cfg.DefaultMarketID = "market-news-001"
+	}
+	if cfg.ReplicaStaleAfter == 0 {
+		cfg.ReplicaStaleAfter = 5 * time.Second
+	}
+	if cfg.ReplicaOfflineAfter == 0 {
+		cfg.ReplicaOfflineAfter = 15 * time.Second
+	}
+	if cfg.ReplicaOfflineAfter < cfg.ReplicaStaleAfter {
+		cfg.ReplicaOfflineAfter = cfg.ReplicaStaleAfter
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -79,6 +91,7 @@ func NewService(store *EventStore, cfg ServiceConfig) (*Service, error) {
 			},
 		},
 		signalWindow: make(map[string][]signalPoint),
+		replicas:     make(map[string]replicaHealthRecord),
 	}
 
 	return svc, nil
@@ -192,6 +205,8 @@ func (s *Service) evaluateAll(nowMs int64) {
 			s.markets[marketID] = next
 		}
 	}
+
+	s.refreshReplicaHealthLocked(nowMs)
 }
 
 // metricsLocked aggregates rolling-window metrics for a market.
@@ -273,4 +288,104 @@ func (s *Service) emitEventLocked(eventType domain.EventType, marketID string, s
 	)
 	s.hub.Broadcast(evt)
 	return true
+}
+
+func (s *Service) RecordReplicaHeartbeat(in ReplicaHeartbeat) {
+	if in.ReplicaID == "" {
+		return
+	}
+	if in.LastAppliedSeq < 0 {
+		in.LastAppliedSeq = 0
+	}
+	if in.CoreLastSeq < 0 {
+		in.CoreLastSeq = 0
+	}
+
+	nowMs := s.cfg.Now().UnixMilli()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record := s.replicas[in.ReplicaID]
+	record.ReplicaHeartbeat = in
+	record.LastSeenAtMs = nowMs
+	s.replicas[in.ReplicaID] = record
+	s.updateReplicaHealthLocked(in.ReplicaID, nowMs)
+}
+
+func (s *Service) ReplicaStatuses() ReplicasStatusResponse {
+	nowMs := s.cfg.Now().UnixMilli()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.refreshReplicaHealthLocked(nowMs)
+	statuses := make([]ReplicaStatus, 0, len(s.replicas))
+	for replicaID, record := range s.replicas {
+		lag := s.lastSeq - record.LastAppliedSeq
+		if lag < 0 {
+			lag = 0
+		}
+		statuses = append(statuses, ReplicaStatus{
+			ReplicaID:           replicaID,
+			Health:              record.Health,
+			Connected:           record.Connected,
+			LastAppliedSeq:      record.LastAppliedSeq,
+			ReportedCoreLastSeq: record.CoreLastSeq,
+			LagSeq:              lag,
+			LastSyncAt:          record.LastSyncAt,
+			LastSeenAt:          record.LastSeenAtMs,
+		})
+	}
+	sortReplicaStatuses(statuses)
+
+	return ReplicasStatusResponse{
+		GeneratedAtMs:  nowMs,
+		CoreLastSeq:    s.lastSeq,
+		StaleAfterMs:   s.cfg.ReplicaStaleAfter.Milliseconds(),
+		OfflineAfterMs: s.cfg.ReplicaOfflineAfter.Milliseconds(),
+		Replicas:       statuses,
+	}
+}
+
+func (s *Service) refreshReplicaHealthLocked(nowMs int64) {
+	for replicaID := range s.replicas {
+		s.updateReplicaHealthLocked(replicaID, nowMs)
+	}
+}
+
+func (s *Service) updateReplicaHealthLocked(replicaID string, nowMs int64) {
+	record, ok := s.replicas[replicaID]
+	if !ok {
+		return
+	}
+
+	ageMs := nowMs - record.LastSeenAtMs
+	next := classifyReplicaHealth(
+		record.Connected,
+		ageMs,
+		s.cfg.ReplicaStaleAfter.Milliseconds(),
+		s.cfg.ReplicaOfflineAfter.Milliseconds(),
+	)
+	if record.Health == next {
+		return
+	}
+
+	lag := s.lastSeq - record.LastAppliedSeq
+	if lag < 0 {
+		lag = 0
+	}
+
+	s.cfg.Logger.Info("replica health transition",
+		"replica_id", replicaID,
+		"transition", formatReplicaTransition(record.Health, next),
+		"connected", record.Connected,
+		"last_seen_at_ms", record.LastSeenAtMs,
+		"last_applied_seq", record.LastAppliedSeq,
+		"core_last_seq", s.lastSeq,
+		"lag_seq", lag,
+	)
+
+	record.Health = next
+	s.replicas[replicaID] = record
 }

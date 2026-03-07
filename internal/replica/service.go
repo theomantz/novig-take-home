@@ -2,6 +2,7 @@ package replica
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,12 +23,14 @@ import (
 var ErrSeqGap = errors.New("sequence gap detected")
 
 type ServiceConfig struct {
-	ID               string
-	CoreBaseURL      string
-	HTTPClient       *http.Client
-	Logger           *slog.Logger
-	ReconnectBackoff time.Duration
-	Now              func() time.Time
+	ID                string
+	CoreBaseURL       string
+	HTTPClient        *http.Client
+	Logger            *slog.Logger
+	ReconnectBackoff  time.Duration
+	HeartbeatInterval time.Duration
+	HeartbeatTimeout  time.Duration
+	Now               func() time.Time
 }
 
 type Status struct {
@@ -64,6 +67,12 @@ func NewService(store *Store, cfg ServiceConfig) (*Service, error) {
 	if cfg.ReconnectBackoff == 0 {
 		cfg.ReconnectBackoff = 500 * time.Millisecond
 	}
+	if cfg.HeartbeatInterval <= 0 {
+		cfg.HeartbeatInterval = 2 * time.Second
+	}
+	if cfg.HeartbeatTimeout <= 0 {
+		cfg.HeartbeatTimeout = 2 * time.Second
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -85,6 +94,8 @@ func NewService(store *Store, cfg ServiceConfig) (*Service, error) {
 }
 
 func (s *Service) Start(ctx context.Context) {
+	go s.reportHeartbeats(ctx)
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -311,6 +322,70 @@ func (s *Service) setConnected(v bool) {
 	s.mu.Lock()
 	s.connected = v
 	s.mu.Unlock()
+}
+
+func (s *Service) reportHeartbeats(ctx context.Context) {
+	if err := s.sendHeartbeat(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		s.cfg.Logger.Warn("replica heartbeat failed", "replica_id", s.cfg.ID, "error", err)
+	}
+
+	t := time.NewTicker(s.cfg.HeartbeatInterval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := s.sendHeartbeat(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				s.cfg.Logger.Warn("replica heartbeat failed", "replica_id", s.cfg.ID, "error", err)
+			}
+		}
+	}
+}
+
+type heartbeatRequest struct {
+	ReplicaID      string `json:"replica_id"`
+	Connected      bool   `json:"connected"`
+	LastAppliedSeq int64  `json:"last_applied_seq"`
+	CoreLastSeq    int64  `json:"core_last_seq"`
+	LastSyncAt     int64  `json:"last_sync_at"`
+}
+
+func (s *Service) sendHeartbeat(ctx context.Context) error {
+	status := s.Status()
+	payload, err := json.Marshal(heartbeatRequest{
+		ReplicaID:      s.cfg.ID,
+		Connected:      status.Connected,
+		LastAppliedSeq: status.LastAppliedSeq,
+		CoreLastSeq:    status.CoreLastSeq,
+		LastSyncAt:     status.LastSyncAt,
+	})
+	if err != nil {
+		return err
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, s.cfg.HeartbeatTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, s.cfg.CoreBaseURL+"/internal/replicas/heartbeat", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return fmt.Errorf("heartbeat status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	return nil
 }
 
 func (s *Service) Markets() []domain.MarketState {

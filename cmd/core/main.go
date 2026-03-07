@@ -28,11 +28,13 @@ func main() {
 	defer store.Close()
 
 	svc, err := core.NewService(store, core.ServiceConfig{
-		Breaker:         domain.DefaultBreakerConfig(),
-		TickInterval:    time.Second,
-		WindowDuration:  30 * time.Second,
-		DefaultMarketID: getEnv("DEFAULT_MARKET_ID", "market-news-001"),
-		Logger:          logger,
+		Breaker:             domain.DefaultBreakerConfig(),
+		TickInterval:        time.Second,
+		WindowDuration:      30 * time.Second,
+		DefaultMarketID:     getEnv("DEFAULT_MARKET_ID", "market-news-001"),
+		ReplicaStaleAfter:   time.Duration(getEnvInt("REPLICA_STALE_AFTER_MS", 5000)) * time.Millisecond,
+		ReplicaOfflineAfter: time.Duration(getEnvInt("REPLICA_OFFLINE_AFTER_MS", 15000)) * time.Millisecond,
+		Logger:              logger,
 	})
 	if err != nil {
 		logger.Error("failed to init core service", "error", err)
