@@ -110,7 +110,7 @@ func (s *Service) IngestSignal(in domain.SignalInput) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.ensureMarketLocked(in.MarketID, nowMs)
+	s.ensureMarketExistsLocked(in.MarketID, nowMs)
 	s.signalWindow[in.MarketID] = append(s.signalWindow[in.MarketID], signalPoint{
 		TsUnixMs:            in.TsUnixMs,
 		BetCount:            in.BetCount,
@@ -129,7 +129,7 @@ func (s *Service) ClearSignals(marketID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.ensureMarketLocked(marketID, nowMs)
+	s.ensureMarketExistsLocked(marketID, nowMs)
 	s.signalWindow[marketID] = nil
 }
 
@@ -173,7 +173,7 @@ func (s *Service) evaluateAll(nowMs int64) {
 	}
 
 	for marketID := range marketIDs {
-		s.ensureMarketLocked(marketID, nowMs)
+		s.ensureMarketExistsLocked(marketID, nowMs)
 		s.pruneSignalsLocked(marketID, nowMs)
 
 		metrics := s.metricsLocked(marketID)
@@ -194,6 +194,8 @@ func (s *Service) evaluateAll(nowMs int64) {
 	}
 }
 
+// metricsLocked aggregates rolling-window metrics for a market.
+// Must be called with s.mu held.
 func (s *Service) metricsLocked(marketID string) domain.WindowMetrics {
 	points := s.signalWindow[marketID]
 	var out domain.WindowMetrics
@@ -205,7 +207,9 @@ func (s *Service) metricsLocked(marketID string) domain.WindowMetrics {
 	return out
 }
 
-func (s *Service) ensureMarketLocked(marketID string, nowMs int64) {
+// ensureMarketExistsLocked initializes market state when first seen.
+// Must be called with s.mu held.
+func (s *Service) ensureMarketExistsLocked(marketID string, nowMs int64) {
 	if _, ok := s.markets[marketID]; !ok {
 		s.markets[marketID] = domain.MarketState{
 			MarketID:             marketID,
@@ -215,6 +219,8 @@ func (s *Service) ensureMarketLocked(marketID string, nowMs int64) {
 	}
 }
 
+// pruneSignalsLocked drops signals outside the configured rolling window.
+// Must be called with s.mu held.
 func (s *Service) pruneSignalsLocked(marketID string, nowMs int64) {
 	points := s.signalWindow[marketID]
 	if len(points) == 0 {
@@ -230,6 +236,8 @@ func (s *Service) pruneSignalsLocked(marketID string, nowMs int64) {
 	s.signalWindow[marketID] = filtered
 }
 
+// emitEventLocked persists and broadcasts a replication event for a market state update.
+// Must be called with s.mu held.
 func (s *Service) emitEventLocked(eventType domain.EventType, marketID string, state domain.MarketState) bool {
 	payload, err := json.Marshal(state)
 	if err != nil {
