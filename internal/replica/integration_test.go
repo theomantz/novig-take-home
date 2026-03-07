@@ -124,7 +124,7 @@ func TestForcedSequenceGapTriggersSnapshotRecovery(t *testing.T) {
 	}))
 	defer server.Close()
 
-	store, err := replica.NewStore("file:replica_gap_test?mode=memory&cache=shared")
+	store, err := replica.NewStore(replica.InMemoryDSN("gap_test"))
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestReplicaReconnectResumesFromCheckpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	store, err := replica.NewStore("file:replica_resume_checkpoint?mode=memory&cache=shared")
+	store, err := replica.NewStore(replica.InMemoryDSN("resume_checkpoint"))
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestReplicaRestartBootstrapsFromSnapshotAndConverges(t *testing.T) {
 func startCoreTestServer(t *testing.T) (string, func()) {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	dsn := fmt.Sprintf("file:core_test_%d?mode=memory&cache=shared", time.Now().UnixNano())
+	dsn := core.InMemoryDSN(fmt.Sprintf("core_test_%d", time.Now().UnixNano()))
 	store, err := core.NewEventStore(dsn)
 	if err != nil {
 		t.Fatalf("new core store: %v", err)
@@ -312,7 +312,7 @@ func startCoreTestServer(t *testing.T) (string, func()) {
 func startReplicaTestServer(t *testing.T, id string, coreURL string) (*replica.Service, string, func()) {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	dsn := fmt.Sprintf("file:replica_test_%s_%d?mode=memory&cache=shared", id, time.Now().UnixNano())
+	dsn := replica.InMemoryDSN(fmt.Sprintf("test_%s_%d", id, time.Now().UnixNano()))
 	store, err := replica.NewStore(dsn)
 	if err != nil {
 		t.Fatalf("new replica store: %v", err)

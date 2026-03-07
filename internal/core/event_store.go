@@ -3,11 +3,21 @@ package core
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 
 	"novig-take-home/internal/domain"
 
 	_ "modernc.org/sqlite"
 )
+
+const inMemoryDSNOptions = "?mode=memory&cache=shared"
+
+func InMemoryDSN(dbName string) string {
+	if dbName == "" {
+		dbName = "core_events"
+	}
+	return fmt.Sprintf("file:%s%s", url.PathEscape(dbName), inMemoryDSNOptions)
+}
 
 type EventStore struct {
 	db *sql.DB

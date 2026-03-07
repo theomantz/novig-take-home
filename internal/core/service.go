@@ -180,7 +180,7 @@ func (s *Service) evaluateAll(nowMs int64) {
 		prev := s.markets[marketID]
 		next, transitionType, transitioned := domain.ApplyBreaker(nowMs, prev, metrics, s.cfg.Breaker)
 
-		if marketStateEqual(prev, next) {
+		if prev.IsEqual(next) {
 			continue
 		}
 
@@ -188,8 +188,9 @@ func (s *Service) evaluateAll(nowMs int64) {
 		if transitioned {
 			eventType = transitionType
 		}
-		s.markets[marketID] = next
-		s.emitEventLocked(eventType, marketID, next)
+		if s.emitEventLocked(eventType, marketID, next) {
+			s.markets[marketID] = next
+		}
 	}
 }
 
@@ -229,13 +230,14 @@ func (s *Service) pruneSignalsLocked(marketID string, nowMs int64) {
 	s.signalWindow[marketID] = filtered
 }
 
-func (s *Service) emitEventLocked(eventType domain.EventType, marketID string, state domain.MarketState) {
+func (s *Service) emitEventLocked(eventType domain.EventType, marketID string, state domain.MarketState) bool {
 	payload, err := json.Marshal(state)
 	if err != nil {
 		s.cfg.Logger.Error("marshal payload", "error", err)
-		return
+		return false
 	}
 
+	prevSeq := s.lastSeq
 	s.lastSeq++
 	evt := domain.ReplicationEvent{
 		Seq:       s.lastSeq,
@@ -248,10 +250,11 @@ func (s *Service) emitEventLocked(eventType domain.EventType, marketID string, s
 
 	if err := s.store.Insert(evt); err != nil {
 		s.cfg.Logger.Error("persist event failed", "seq", evt.Seq, "event_id", evt.EventID, "error", err)
+		s.lastSeq = prevSeq
 		if lastSeq, seqErr := s.store.LastSeq(); seqErr == nil {
 			s.lastSeq = lastSeq
 		}
-		return
+		return false
 	}
 
 	s.cfg.Logger.Info("core emitted event",
@@ -261,15 +264,5 @@ func (s *Service) emitEventLocked(eventType domain.EventType, marketID string, s
 		"event_type", evt.EventType,
 	)
 	s.hub.Broadcast(evt)
-}
-
-func marketStateEqual(a, b domain.MarketState) bool {
-	return a.MarketID == b.MarketID &&
-		a.Status == b.Status &&
-		a.BetCount30s == b.BetCount30s &&
-		a.StakeSum30sCents == b.StakeSum30sCents &&
-		a.LiabilityDelta30sCents == b.LiabilityDelta30sCents &&
-		a.CooldownUntilUnixMs == b.CooldownUntilUnixMs &&
-		a.LastReason == b.LastReason &&
-		a.LastTransitionUnixMs == b.LastTransitionUnixMs
+	return true
 }

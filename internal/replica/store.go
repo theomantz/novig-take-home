@@ -3,9 +3,19 @@ package replica
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 
 	_ "modernc.org/sqlite"
 )
+
+const inMemoryDSNOptions = "?mode=memory&cache=shared"
+
+func InMemoryDSN(replicaID string) string {
+	if replicaID == "" {
+		replicaID = "replica"
+	}
+	return fmt.Sprintf("file:replica_%s%s", url.PathEscape(replicaID), inMemoryDSNOptions)
+}
 
 type Store struct {
 	db *sql.DB

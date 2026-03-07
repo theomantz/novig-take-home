@@ -29,7 +29,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	coreStore, err := core.NewEventStore("file:core_events?mode=memory&cache=shared")
+	coreStore, err := core.NewEventStore(core.InMemoryDSN("core_events"))
 	if err != nil {
 		logger.Error("init core store failed", "error", err)
 		os.Exit(1)
@@ -127,7 +127,7 @@ type runningReplica struct {
 }
 
 func startReplica(ctx context.Context, id string, coreURL string, logger *slog.Logger) (*runningReplica, string, error) {
-	dsn := fmt.Sprintf("file:replica_%s?mode=memory&cache=shared", id)
+	dsn := replica.InMemoryDSN(id)
 	store, err := replica.NewStore(dsn)
 	if err != nil {
 		return nil, "", err

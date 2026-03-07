@@ -9,7 +9,7 @@ import (
 )
 
 func TestDuplicateEventIDIsIdempotentNoOp(t *testing.T) {
-	store, err := NewStore("file:replica_test_dup?mode=memory&cache=shared")
+	store, err := NewStore(InMemoryDSN("test_dup"))
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,7 +19,7 @@ func main() {
 	replicaID := getEnv("REPLICA_ID", "replica-1")
 	coreURL := getEnv("CORE_BASE_URL", "http://127.0.0.1:8080")
 	port := getEnvInt("REPLICA_PORT", 8081)
-	dsn := fmt.Sprintf("file:replica_%s?mode=memory&cache=shared", replicaID)
+	dsn := replica.InMemoryDSN(replicaID)
 
 	store, err := replica.NewStore(dsn)
 	if err != nil {

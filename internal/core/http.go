@@ -108,12 +108,6 @@ func handleStream(svc *Service, w http.ResponseWriter, r *http.Request, logger *
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	// Flush headers immediately so clients can establish the SSE session without waiting for new events.
-	if _, err := fmt.Fprint(w, ":connected\n\n"); err != nil {
-		return
-	}
-	flusher.Flush()
-
 	streamCh, unsubscribe := svc.Subscribe(1024)
 	defer unsubscribe()
 
@@ -123,6 +117,13 @@ func handleStream(svc *Service, w http.ResponseWriter, r *http.Request, logger *
 		shared.WriteError(w, http.StatusInternalServerError, "failed to load backlog")
 		return
 	}
+
+	// Flush headers immediately so clients can establish the SSE session without waiting for new events.
+	if _, err := fmt.Fprint(w, ":connected\n\n"); err != nil {
+		return
+	}
+	flusher.Flush()
+
 	for _, evt := range backlog {
 		if err := writeSSEEvent(w, flusher, evt); err != nil {
 			logger.Warn("stream write failed", "error", err)

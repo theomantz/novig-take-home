@@ -18,7 +18,7 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	port := getEnvInt("CORE_PORT", 8080)
-	dsn := "file:core_events?mode=memory&cache=shared"
+	dsn := core.InMemoryDSN(getEnv("CORE_DB_NAME", "core_events"))
 
 	store, err := core.NewEventStore(dsn)
 	if err != nil {

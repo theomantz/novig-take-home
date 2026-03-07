@@ -31,34 +31,45 @@ func ApplyBreaker(nowUnixMs int64, prev MarketState, metrics WindowMetrics, cfg 
 	}
 
 	if next.Status == MarketStatusOpen {
-		if metrics.BetCount30s >= cfg.BetCountThreshold {
-			next.Status = MarketStatusSuspended
-			next.CooldownUntilUnixMs = nowUnixMs + cfg.CooldownMs
-			next.LastReason = BreakerReasonBetRateSpike
-			next.LastTransitionUnixMs = nowUnixMs
-			return next, EventTypeMarketSuspended, true
-		}
-		if metrics.LiabilityDelta30sCents >= cfg.LiabilityThresholdCents {
-			next.Status = MarketStatusSuspended
-			next.CooldownUntilUnixMs = nowUnixMs + cfg.CooldownMs
-			next.LastReason = BreakerReasonLiabilitySpike
-			next.LastTransitionUnixMs = nowUnixMs
+		if reason, shouldSuspend := suspensionReason(metrics, cfg); shouldSuspend {
+			next = suspendMarket(next, nowUnixMs, reason, cfg)
 			return next, EventTypeMarketSuspended, true
 		}
 		return next, EventTypeMarketUpdated, false
 	}
 
-	if next.Status == MarketStatusSuspended {
-		if nowUnixMs >= next.CooldownUntilUnixMs &&
-			metrics.BetCount30s < cfg.BetCountThreshold &&
-			metrics.LiabilityDelta30sCents < cfg.LiabilityThresholdCents {
-			next.Status = MarketStatusOpen
-			next.CooldownUntilUnixMs = 0
-			next.LastReason = BreakerReasonNone
-			next.LastTransitionUnixMs = nowUnixMs
-			return next, EventTypeMarketReopened, true
-		}
+	if next.Status == MarketStatusSuspended && canReopenMarket(nowUnixMs, next, metrics, cfg) {
+		next.Status = MarketStatusOpen
+		next.CooldownUntilUnixMs = 0
+		next.LastReason = BreakerReasonNone
+		next.LastTransitionUnixMs = nowUnixMs
+		return next, EventTypeMarketReopened, true
 	}
 
 	return next, EventTypeMarketUpdated, false
+}
+
+func suspensionReason(metrics WindowMetrics, cfg BreakerConfig) (BreakerReason, bool) {
+	if metrics.BetCount30s >= cfg.BetCountThreshold {
+		return BreakerReasonBetRateSpike, true
+	}
+	if metrics.LiabilityDelta30sCents >= cfg.LiabilityThresholdCents {
+		return BreakerReasonLiabilitySpike, true
+	}
+	return BreakerReasonNone, false
+}
+
+func suspendMarket(state MarketState, nowUnixMs int64, reason BreakerReason, cfg BreakerConfig) MarketState {
+	state.Status = MarketStatusSuspended
+	state.CooldownUntilUnixMs = nowUnixMs + cfg.CooldownMs
+	state.LastReason = reason
+	state.LastTransitionUnixMs = nowUnixMs
+	return state
+}
+
+func canReopenMarket(nowUnixMs int64, state MarketState, metrics WindowMetrics, cfg BreakerConfig) bool {
+	cooldownElapsed := nowUnixMs >= state.CooldownUntilUnixMs
+	signalsNormalized := metrics.BetCount30s < cfg.BetCountThreshold &&
+		metrics.LiabilityDelta30sCents < cfg.LiabilityThresholdCents
+	return cooldownElapsed && signalsNormalized
 }
