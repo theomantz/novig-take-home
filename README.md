@@ -184,6 +184,15 @@ Run vet:
 go vet ./...
 ```
 
+Run the `event_log` sequence-read benchmark used for index evaluation:
+
+```bash
+go run ./cmd/eventlog-bench
+```
+
+Benchmark decision and captured results are documented in
+[`docs/benchmarks/event_log_seq_reads.md`](docs/benchmarks/event_log_seq_reads.md).
+
 Implemented tests include:
 
 - Unit tests
@@ -204,6 +213,8 @@ Implemented tests include:
 - `cmd/core`: core service binary
 - `cmd/replica`: replica service binary
 - `cmd/demo`: scripted end-to-end demo runner
+- `cmd/eventlog-bench`: event log read-pattern benchmark utility
+- `docs/benchmarks`: captured benchmark runs and decisions
 - `internal/domain`: shared domain types and breaker logic
 - `internal/core`: event log, state machine, SSE API
 - `internal/replica`: SSE consumer, dedupe/checkpoint store, read API

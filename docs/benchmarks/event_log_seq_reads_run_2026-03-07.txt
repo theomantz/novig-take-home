@@ -1,0 +1,85 @@
+# event_log read benchmark
+Generated: 2026-03-07T14:36:18-05:00
+
+Scalar iterations/query: 5000
+Range iterations/query: 25
+Tail replay window: 1000 rows
+
+## Rows: 10000
+
+| Variant | Query | Param | Avg | P50 | P95 |
+| --- | --- | --- | --- | --- | --- |
+| baseline | max_seq | n/a | 4.11µs | 3.92µs | 4.42µs |
+| baseline | latest_desc_limit_1 | n/a | 4.37µs | 3.79µs | 4.54µs |
+| baseline | asc_replay_from_head | from_seq=1 | 15.91ms | 15.75ms | 16.86ms |
+| baseline | asc_replay_from_tail | from_seq=9001 | 1.57ms | 1.53ms | 1.83ms |
+
+Query plan (baseline):
+- max_seq: SEARCH event_log
+- latest_desc_limit_1: SCAN event_log
+- asc_replay_from_head: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+- asc_replay_from_tail: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+
+| with_seq_desc_index | max_seq | n/a | 4.31µs | 4.12µs | 4.71µs |
+| with_seq_desc_index | latest_desc_limit_1 | n/a | 4.09µs | 3.96µs | 4.33µs |
+| with_seq_desc_index | asc_replay_from_head | from_seq=1 | 15.82ms | 15.67ms | 16.90ms |
+| with_seq_desc_index | asc_replay_from_tail | from_seq=9001 | 1.64ms | 1.59ms | 1.86ms |
+
+Query plan (with_seq_desc_index):
+- max_seq: SEARCH event_log USING COVERING INDEX idx_event_log_seq_desc
+- latest_desc_limit_1: SCAN event_log USING COVERING INDEX idx_event_log_seq_desc
+- asc_replay_from_head: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+- asc_replay_from_tail: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+
+## Rows: 100000
+
+| Variant | Query | Param | Avg | P50 | P95 |
+| --- | --- | --- | --- | --- | --- |
+| baseline | max_seq | n/a | 4.17µs | 3.92µs | 4.88µs |
+| baseline | latest_desc_limit_1 | n/a | 3.85µs | 3.71µs | 4.12µs |
+| baseline | asc_replay_from_head | from_seq=1 | 162.33ms | 159.56ms | 185.63ms |
+| baseline | asc_replay_from_tail | from_seq=99001 | 1.61ms | 1.54ms | 1.84ms |
+
+Query plan (baseline):
+- max_seq: SEARCH event_log
+- latest_desc_limit_1: SCAN event_log
+- asc_replay_from_head: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+- asc_replay_from_tail: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+
+| with_seq_desc_index | max_seq | n/a | 4.44µs | 4.21µs | 5.25µs |
+| with_seq_desc_index | latest_desc_limit_1 | n/a | 4.56µs | 4.08µs | 5.17µs |
+| with_seq_desc_index | asc_replay_from_head | from_seq=1 | 162.27ms | 161.16ms | 170.41ms |
+| with_seq_desc_index | asc_replay_from_tail | from_seq=99001 | 1.61ms | 1.58ms | 1.88ms |
+
+Query plan (with_seq_desc_index):
+- max_seq: SEARCH event_log USING COVERING INDEX idx_event_log_seq_desc
+- latest_desc_limit_1: SCAN event_log USING COVERING INDEX idx_event_log_seq_desc
+- asc_replay_from_head: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+- asc_replay_from_tail: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+
+## Rows: 250000
+
+| Variant | Query | Param | Avg | P50 | P95 |
+| --- | --- | --- | --- | --- | --- |
+| baseline | max_seq | n/a | 4.11µs | 3.88µs | 4.88µs |
+| baseline | latest_desc_limit_1 | n/a | 4.15µs | 3.83µs | 4.83µs |
+| baseline | asc_replay_from_head | from_seq=1 | 408.14ms | 400.42ms | 471.99ms |
+| baseline | asc_replay_from_tail | from_seq=249001 | 1.69ms | 1.63ms | 2.01ms |
+
+Query plan (baseline):
+- max_seq: SEARCH event_log
+- latest_desc_limit_1: SCAN event_log
+- asc_replay_from_head: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+- asc_replay_from_tail: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+
+| with_seq_desc_index | max_seq | n/a | 4.37µs | 4.12µs | 4.75µs |
+| with_seq_desc_index | latest_desc_limit_1 | n/a | 4.14µs | 3.96µs | 4.33µs |
+| with_seq_desc_index | asc_replay_from_head | from_seq=1 | 397.98ms | 399.10ms | 409.77ms |
+| with_seq_desc_index | asc_replay_from_tail | from_seq=249001 | 1.69ms | 1.67ms | 1.90ms |
+
+Query plan (with_seq_desc_index):
+- max_seq: SEARCH event_log USING COVERING INDEX idx_event_log_seq_desc
+- latest_desc_limit_1: SCAN event_log USING COVERING INDEX idx_event_log_seq_desc
+- asc_replay_from_head: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+- asc_replay_from_tail: SEARCH event_log USING INTEGER PRIMARY KEY (rowid>?)
+
