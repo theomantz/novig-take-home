@@ -67,10 +67,10 @@ func NewService(store *Store, cfg ServiceConfig) (*Service, error) {
 	if cfg.ReconnectBackoff == 0 {
 		cfg.ReconnectBackoff = 500 * time.Millisecond
 	}
-	if cfg.HeartbeatInterval == 0 {
+	if cfg.HeartbeatInterval <= 0 {
 		cfg.HeartbeatInterval = 2 * time.Second
 	}
-	if cfg.HeartbeatTimeout == 0 {
+	if cfg.HeartbeatTimeout <= 0 {
 		cfg.HeartbeatTimeout = 2 * time.Second
 	}
 	if cfg.Now == nil {
