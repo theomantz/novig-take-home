@@ -18,7 +18,7 @@ Runs project validation checks:
 
 Options:
   --no-nix      Run commands directly instead of through "nix develop -c".
-  --with-demo   Also run "go run ./cmd/demo" after test and vet checks.
+  --with-demo   Also run "go run ./cmd/demo" after all validation checks.
   -h, --help    Show this help text.
 USAGE
 }
