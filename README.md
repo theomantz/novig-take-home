@@ -342,10 +342,12 @@ curl -s "$R1/markets/$MID/history"
 - `cmd/core`: core binary
 - `cmd/replica`: replica binary
 - `cmd/demo`: end-to-end demo runner
-- `cmd/eventlog-bench`: event log read benchmark harness
+- `cmd/eventlog-bench`: event log read benchmark harness + findings guide
 - `internal/domain`: shared types + breaker logic
 - `internal/core`: event log + breaker loop + SSE + snapshot + replica health
 - `internal/replica`: stream consumer + dedupe/checkpoint store + read APIs
+- `cmd/eventlog-bench/README.md`: canonical benchmark notes/results
+- `docs/benchmarks/event_log_seq_reads_run_2026-03-07.txt`: raw benchmark output snapshot
 - `docs/benchmarks/event_log_seq_reads.md`: benchmark notes/results
 
 ## AI & Tools
