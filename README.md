@@ -1,189 +1,136 @@
 # Novig Take-Home: Core/Replica Market Risk Replication (Go)
 
-This project implements a distributed **core/replica** state replication system for sportsbook market risk controls.
-It models a volatility circuit breaker using **bet-flow signals** (not odds/pricing).
+This repository implements a distributed core/replica system for sportsbook market-risk controls.
+The breaker logic is based on bet-flow signals (bet velocity and liability acceleration), not odds/pricing.
 
-## What is implemented
+## Table of Contents
 
-- `core`: authoritative state owner
-  - Maintains in-memory `MarketState`
-  - Evaluates circuit-breaker rules every 1 second over a rolling 30-second window
-  - Emits ordered replication events (`seq`, `event_id`)
-  - Persists event log in **in-memory SQLite**
-  - Pushes events via **SSE** (`/stream`)
-  - Ingests replica heartbeats and classifies replica health (`healthy|stale|offline`)
-  - Serves snapshot (`/snapshot`), replica health (`/replicas/status`), and scenario/injection endpoints
-- `replica`: follower
-  - Consumes SSE from core (push-based, no polling loop for replication)
-  - Ensures at-least-once consumption + idempotent dedupe by `event_id`
-  - Enforces strict in-order apply by `seq`
-  - Recovers from sequence gaps by fetching snapshot and replacing local state
-  - Stores dedupe/checkpoint in its own **in-memory SQLite**
-  - Serves read-only APIs from replicated in-memory state
+- [Architecture Overview](#architecture-overview)
+- [Replication Invariants](#replication-invariants)
+- [Circuit Breaker Rules](#circuit-breaker-rules)
+- [Prerequisites](#prerequisites)
+- [Detailed Setup](#detailed-setup)
+- [Run the System](#run-the-system)
+- [Test Script](#test-script)
+- [Manual API Testing with curl](#manual-api-testing-with-curl)
+- [API Surface](#api-surface)
+- [Configuration](#configuration)
+- [Project Layout](#project-layout)
 
-## Real-World Use Case
+## Architecture Overview
 
-During a live game, breaking news causes a sudden surge of bets on one market.
-The core detects abnormal bet-flow conditions (bet velocity and liability acceleration), auto-suspends the market, and emits suspension events.
-Multiple replicas converge quickly to the same suspended state, so downstream read clients consistently see that the market is suspended.
-After cooldown and normalized flow, the core auto-reopens the market and replicas converge to OPEN again.
+### Core (`cmd/core`)
 
-This demonstrates sportsbook risk controls under volatility without implementing odds logic.
+- Owns authoritative in-memory market state.
+- Evaluates breaker transitions every 1 second over a 30-second rolling window.
+- Emits replication events with strict, gap-free `seq` ordering.
+- Persists events to in-memory SQLite (`event_log`) before broadcasting.
+- Serves:
+  - SSE stream (`GET /stream?from_seq=<n>`)
+  - snapshot (`GET /snapshot`)
+  - replica health (`GET /replicas/status`)
+  - internal signal/scenario endpoints.
 
-## Domain Model
+### Replica (`cmd/replica`)
 
-### MarketState
+- Bootstraps from core snapshot.
+- Consumes SSE (`/stream`) from `last_applied_seq + 1`.
+- Applies at-least-once delivery with idempotent dedupe by `event_id`.
+- Enforces strict sequential apply (`evt.seq == last_applied_seq + 1`).
+- On any sequence gap, refreshes from `/snapshot` and resumes from checkpoint.
+- Serves read-only APIs (`/markets`, `/replica/status`, etc.).
 
-- `market_id`
-- `status`: `OPEN | SUSPENDED`
-- `bet_count_30s`
-- `stake_sum_30s_cents`
-- `liability_delta_30s_cents`
-- `cooldown_until_unix_ms`
-- `last_reason`: `BET_RATE_SPIKE | LIABILITY_SPIKE`
-- `last_transition_unix_ms`
+### Demo (`cmd/demo`)
 
-### ReplicationEvent
+- Starts one core and two replicas.
+- Triggers `spike` then `normalize` scenarios.
+- Verifies convergence to `SUSPENDED` and then back to `OPEN`.
 
-- `seq`
-- `event_id`
-- `ts_unix_ms`
-- `event_type`: `MARKET_UPDATED | MARKET_SUSPENDED | MARKET_REOPENED`
-- `market_id`
-- `payload` (JSON)
+## Replication Invariants
+
+These are intentional design constraints in this repo:
+
+1. Core `seq` ordering is strictly increasing and gap-free.
+2. Core persists events before SSE broadcast.
+3. If core persistence fails, authoritative state and `lastSeq` do not advance.
+4. Replica dedupes on `event_id`.
+5. Replica only applies `evt.seq == last_applied_seq + 1`.
+6. Sequence mismatch is treated as a gap and triggers snapshot recovery.
 
 ## Circuit Breaker Rules
 
-Evaluated every 1 second over a rolling 30-second window:
+Evaluated every second over the rolling 30-second window:
 
-- Suspend if `bet_count_30s >= 120`
-- Suspend if `liability_delta_30s_cents >= 2_000_000`
-- Cooldown is 60 seconds
-- Reopen only if cooldown elapsed **and** both signals are below thresholds
+- Suspend if `bet_count_30s >= 120`.
+- Suspend if `liability_delta_30s_cents >= 2_000_000`.
+- Cooldown duration: 60 seconds.
+- Reopen only when cooldown elapsed and both metrics are back below thresholds.
 
-## In-Memory SQLite Configuration
+## Prerequisites
 
-- Core DSN: `file:core_events?mode=memory&cache=shared`
-- Replica DSN pattern: `file:replica_<id>?mode=memory&cache=shared`
+- Recommended: [Nix](https://nixos.org/download/) with flakes enabled.
+- Go `1.22+` (fallback path if you are not using Nix).
+- `curl` for manual endpoint validation.
+- Optional: `jq` for pretty-printing JSON responses.
 
-Notes:
+## Detailed Setup
 
-- Each service instance has its own process-local in-memory DB
-- `cache=shared` allows sharing across connections inside a process
-- Data is ephemeral and disappears on process exit
+### 1. Clone and enter the repo
 
-## API Contract
+```bash
+git clone <your-fork-or-origin-url>
+cd novig-take-home
+```
 
-### Core
+### 2. Preferred tooling path (Nix)
 
-- `GET /stream?from_seq=<n>` (SSE stream)
-- `GET /snapshot`
-- `GET /replicas/status`
-- `POST /internal/events`
-- `POST /internal/replicas/heartbeat`
-- `POST /internal/scenarios/{name}` where `{name}` is `spike` or `normalize`
-- `GET /healthz`
+```bash
+nix develop
+```
 
-### Replica
+Inside the shell, verify toolchain:
 
-- `GET /markets`
-- `GET /markets/{market_id}`
-- `GET /markets/{market_id}/history`
-- `GET /replica/status`
-- `GET /healthz`
+```bash
+go version
+```
 
-## Replica Health Model
+### 3. Fallback tooling path (native Go)
 
-Replica processes post periodic heartbeats to core (`POST /internal/replicas/heartbeat`) with:
+If Nix is unavailable, install Go `1.22+` and run commands directly.
 
-- `replica_id`
-- `connected` (whether replica is currently connected to `/stream`)
-- `last_applied_seq`
-- `core_last_seq` (highest sequence observed by replica)
-- `last_sync_at`
+```bash
+go version
+```
 
-Core computes per-replica health in `/replicas/status` using:
+### 4. Baseline validation
 
-- `healthy`: heartbeat age < stale threshold and replica reports `connected=true`
-- `stale`: heartbeat age >= stale threshold and < offline threshold
-- `offline`: heartbeat age >= offline threshold or replica reports `connected=false`
+Run the repository test script:
 
-Defaults:
+```bash
+scripts/test.sh
+```
 
-- stale threshold: `5s` (`REPLICA_STALE_AFTER_MS`)
-- offline threshold: `15s` (`REPLICA_OFFLINE_AFTER_MS`)
+This runs, in order:
 
-Replica heartbeat cadence defaults to `2s` and is tunable via:
+1. `go test ./...`
+2. `go vet ./...`
+3. `go test -race ./...`
 
-- `REPLICA_HEARTBEAT_INTERVAL_MS`
-- `REPLICA_HEARTBEAT_TIMEOUT_MS`
+## Run the System
 
-Replica connectivity/recovery behavior is tunable via:
-
-- `REPLICA_RECONNECT_BACKOFF_INITIAL_MS` (default `500`)
-- `REPLICA_RECONNECT_BACKOFF_MAX_MS` (default `5000`)
-- `REPLICA_SNAPSHOT_TIMEOUT_MS` (default `3000`)
-- `REPLICA_STREAM_IDLE_TIMEOUT_MS` (default `45000`)
-
-Replica `GET /replica/status` also reports:
-
-- `bootstrapped` (whether at least one valid snapshot sync has completed)
-- `last_error` (most recent bootstrap/stream/snapshot error string, empty on healthy steady-state)
-
-## Data Flow and Consistency
-
-1. Core ingests synthetic/manual bet-flow signals.
-2. Core ticker computes 30s metrics and evaluates breaker transitions.
-3. State changes emit ordered events (`seq`) persisted in `core.event_log`.
-4. Replicas consume pushed SSE events from `from_seq=last_applied_seq+1`.
-5. Replica dedupes by `event_id` using `applied_events` table.
-6. Replica applies only if `seq == last_applied_seq + 1`.
-7. On sequence mismatch, replica fetches `/snapshot`, replaces local state, updates checkpoint, then resumes stream.
-8. Replica posts heartbeat reports to core on a fixed interval.
-9. Core tracks liveness/lag and exposes consolidated replica health from `/replicas/status`.
-
-### Delivery semantics
-
-- At-least-once delivery from stream/reconnect behavior
-- Idempotency via `event_id` dedupe (`INSERT OR IGNORE` path)
-- Event ordering enforced by sequence checks
-- Replica rejects malformed events/snapshots (invalid IDs/types/payload mismatch or regressed snapshot `last_seq`)
-
-## Trade-offs
-
-- Snapshot-on-gap is simple and robust for take-home scope, but can discard local per-event history continuity across recovery boundaries.
-- In-memory SQLite keeps runtime deterministic and fast, but state is non-durable by design.
-- SSE is one-way and operationally simple for fanout; if bi-directional flow were needed, WebSockets/gRPC streams would be candidates.
-
-## How to Run
-
-### Prerequisites
-
-- Go 1.22+
-
-### Scripted demo (one command)
+### Option A: scripted convergence demo
 
 ```bash
 go run ./cmd/demo
 ```
 
-What it does:
-
-- Starts core + 2 replicas
-- Triggers `spike`
-- Verifies both replicas converge to `SUSPENDED`
-- Triggers `normalize`
-- Waits through cooldown and verifies both replicas converge back to `OPEN`
-
-Optional hold mode:
+Keep services alive after verification:
 
 ```bash
 go run ./cmd/demo -hold
 ```
 
-### Interactive demo
-
-Run three terminals:
+### Option B: manual multi-terminal run
 
 Terminal 1 (core):
 
@@ -203,75 +150,199 @@ Terminal 3 (replica 2):
 REPLICA_ID=r2 REPLICA_PORT=8082 CORE_BASE_URL=http://127.0.0.1:8080 go run ./cmd/replica
 ```
 
-Example interactive calls:
+## Test Script
+
+The repository includes `scripts/test.sh`:
 
 ```bash
-curl -X POST http://127.0.0.1:8080/internal/scenarios/spike
-curl http://127.0.0.1:8081/markets/market-news-001
-curl http://127.0.0.1:8082/markets/market-news-001
-curl -X POST http://127.0.0.1:8080/internal/scenarios/normalize
-curl http://127.0.0.1:8081/replica/status
-curl http://127.0.0.1:8082/replica/status
-curl http://127.0.0.1:8080/replicas/status
+scripts/test.sh --help
 ```
 
-## Testing
+Options:
 
-Run all tests:
+- `--no-nix`: run commands directly instead of `nix develop -c ...`
+- `--with-demo`: also run `go run ./cmd/demo` after tests
+
+Example with demo:
 
 ```bash
-go test ./...
+scripts/test.sh --with-demo
 ```
 
-Run vet:
-
-```bash
-go vet ./...
-```
-
-Run the `event_log` sequence-read benchmark used for index evaluation:
+Optional benchmark command (used for event-log sequence read behavior):
 
 ```bash
 go run ./cmd/eventlog-bench
 ```
 
-Benchmark decision and captured results are documented in
-[`docs/benchmarks/event_log_seq_reads.md`](docs/benchmarks/event_log_seq_reads.md).
+## Manual API Testing with curl
 
-Implemented tests include:
+Assuming core is on `:8080`, replicas on `:8081` and `:8082`.
 
-- Unit tests
-  - breaker trips on bet-rate threshold
-  - breaker trips on liability threshold
-  - breaker does not trip below thresholds
-  - auto-reopen only after cooldown + normalized metrics
-  - duplicate `event_id` is idempotent no-op
-- Integration tests
-  - single replica convergence
-  - two replica convergence
-  - forced sequence gap -> snapshot recovery
-  - reconnect resumes from checkpoint
-  - restart bootstraps from snapshot + stream and converges
+### 0. Export convenience variables
 
-## Project Structure
+```bash
+CORE=http://127.0.0.1:8080
+R1=http://127.0.0.1:8081
+R2=http://127.0.0.1:8082
+MID=market-news-001
+```
 
-- `cmd/core`: core service binary
-- `cmd/replica`: replica service binary
-- `cmd/demo`: scripted end-to-end demo runner
-- `cmd/eventlog-bench`: event log read-pattern benchmark utility
-- `docs/benchmarks`: captured benchmark runs and decisions
-- `internal/domain`: shared domain types and breaker logic
-- `internal/core`: event log, state machine, SSE API
-- `internal/replica`: SSE consumer, dedupe/checkpoint store, read API
-- `internal/shared`: shared HTTP helpers
+### 1. Health checks
 
-## AI & Tools
+```bash
+curl -s "$CORE/healthz"
+curl -s "$R1/healthz"
+curl -s "$R2/healthz"
+```
 
-Used:
+### 2. Inspect initial state
 
-- Codex (GPT-5) for implementation and test scaffolding
-- Go standard tooling (`go test`, `go vet`, `gofmt`, `go mod tidy`)
+First, ensure both replicas are bootstrapped and connected:
 
-Overridden/adjusted during development:
+```bash
+curl -s "$R1/replica/status"
+curl -s "$R2/replica/status"
+```
 
-- SSE stream behavior was adjusted to flush an initial SSE comment immediately so clients establish long-lived stream connections without waiting for the first business event.
+Then inspect market/snapshot state:
+
+```bash
+curl -s "$CORE/snapshot"
+curl -s "$R1/markets/$MID"
+curl -s "$R2/markets/$MID"
+```
+
+### 3. Observe replication stream directly (optional)
+
+Run this in a separate terminal:
+
+```bash
+curl -N "$CORE/stream?from_seq=1"
+```
+
+Expected stream frame pattern:
+
+- initial `:connected`
+- heartbeat comments `:keepalive`
+- replication events:
+  - `event: replication`
+  - `data: {"seq":...,"event_id":"...",...}`
+
+### 4. Trigger suspension scenario
+
+```bash
+curl -s -X POST "$CORE/internal/scenarios/spike"
+```
+
+Check both replicas converged to `SUSPENDED`:
+
+```bash
+curl -s "$R1/markets/$MID"
+curl -s "$R2/markets/$MID"
+```
+
+### 5. Check replica and core replication status
+
+```bash
+curl -s "$R1/replica/status"
+curl -s "$R2/replica/status"
+curl -s "$CORE/replicas/status"
+```
+
+### 6. Trigger normalize and wait for reopen after cooldown
+
+```bash
+curl -s -X POST "$CORE/internal/scenarios/normalize"
+```
+
+Poll until both replicas return to `OPEN` (cooldown is 60 seconds):
+
+```bash
+for i in {1..90}; do
+  s1=$(curl -s "$R1/markets/$MID" | jq -r '.status')
+  s2=$(curl -s "$R2/markets/$MID" | jq -r '.status')
+  echo "tick=$i r1=$s1 r2=$s2"
+  if [[ "$s1" == "OPEN" && "$s2" == "OPEN" ]]; then
+    echo "both replicas reopened"
+    break
+  fi
+  sleep 1
+done
+```
+
+### 7. Inject custom signal payload (manual event input)
+
+```bash
+curl -s -X POST "$CORE/internal/events" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "market_id": "market-news-001",
+    "bet_count": 10,
+    "stake_cents": 25000,
+    "liability_delta_cents": 50000
+  }'
+```
+
+### 8. Read history from a replica
+
+```bash
+curl -s "$R1/markets/$MID/history"
+```
+
+## API Surface
+
+### Core
+
+- `GET /stream?from_seq=<n>`
+- `GET /snapshot`
+- `GET /replicas/status`
+- `POST /internal/events`
+- `POST /internal/replicas/heartbeat`
+- `POST /internal/scenarios/{spike|normalize}`
+- `GET /healthz`
+
+### Replica
+
+- `GET /markets`
+- `GET /markets/{market_id}`
+- `GET /markets/{market_id}/history`
+- `GET /replica/status`
+- `GET /healthz`
+
+## Configuration
+
+### Core env vars
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CORE_PORT` | `8080` | Core HTTP port |
+| `CORE_DB_NAME` | `core_events` | In-memory SQLite DB name (`file:<name>?mode=memory&cache=shared`) |
+| `DEFAULT_MARKET_ID` | `market-news-001` | Default market ID used by scenarios/signals |
+| `REPLICA_STALE_AFTER_MS` | `5000` | Heartbeat age threshold for `stale` |
+| `REPLICA_OFFLINE_AFTER_MS` | `15000` | Heartbeat age threshold for `offline` |
+
+### Replica env vars
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `REPLICA_ID` | `replica-1` | Replica identifier |
+| `REPLICA_PORT` | `8081` | Replica HTTP port |
+| `CORE_BASE_URL` | `http://127.0.0.1:8080` | Core base URL |
+| `REPLICA_RECONNECT_BACKOFF_INITIAL_MS` | `500` | Initial reconnect backoff |
+| `REPLICA_RECONNECT_BACKOFF_MAX_MS` | `5000` | Reconnect backoff cap |
+| `REPLICA_SNAPSHOT_TIMEOUT_MS` | `3000` | Snapshot fetch timeout |
+| `REPLICA_STREAM_IDLE_TIMEOUT_MS` | `45000` | Stream idle timeout before reconnect |
+| `REPLICA_HEARTBEAT_INTERVAL_MS` | `2000` | Heartbeat cadence to core |
+| `REPLICA_HEARTBEAT_TIMEOUT_MS` | `2000` | Heartbeat POST timeout |
+
+## Project Layout
+
+- `cmd/core`: core binary
+- `cmd/replica`: replica binary
+- `cmd/demo`: end-to-end demo runner
+- `cmd/eventlog-bench`: event log read benchmark harness
+- `internal/domain`: shared types + breaker logic
+- `internal/core`: event log + breaker loop + SSE + snapshot + replica health
+- `internal/replica`: stream consumer + dedupe/checkpoint store + read APIs
+- `docs/benchmarks/event_log_seq_reads.md`: benchmark notes/results
