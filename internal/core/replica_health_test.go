@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// TestReplicaStatusesClassifyHealthyStaleOffline verifies health class transitions and lag math from heartbeat age.
 func TestReplicaStatusesClassifyHealthyStaleOffline(t *testing.T) {
 	store, err := NewEventStore(InMemoryDSN("replica_health_classification"))
 	if err != nil {
@@ -81,6 +82,7 @@ func TestReplicaStatusesClassifyHealthyStaleOffline(t *testing.T) {
 	}
 }
 
+// TestReplicaStatusEndpointsAcceptHeartbeatAndExposeStatus validates heartbeat ingestion and status API output.
 func TestReplicaStatusEndpointsAcceptHeartbeatAndExposeStatus(t *testing.T) {
 	store, err := NewEventStore(InMemoryDSN("replica_health_http"))
 	if err != nil {

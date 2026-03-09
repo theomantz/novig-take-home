@@ -15,6 +15,7 @@ import (
 
 var streamHeartbeatInterval = 15 * time.Second
 
+// NewHandler wires core APIs for snapshot, stream, scenario controls, and replica heartbeats.
 func NewHandler(svc *Service, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -105,6 +106,7 @@ func NewHandler(svc *Service, logger *slog.Logger) http.Handler {
 	return mux
 }
 
+// runSpikeScenario injects a burst of high-intensity signals to force breaker suspension.
 func runSpikeScenario(svc *Service, marketID string) {
 	nowMs := time.Now().UnixMilli()
 	for i := 0; i < 24; i++ {
@@ -118,6 +120,7 @@ func runSpikeScenario(svc *Service, marketID string) {
 	}
 }
 
+// handleStream serves SSE backlog replay plus live replication events with gap fill and keepalives.
 func handleStream(svc *Service, w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
 	fromSeq := int64(1)
 	if raw := r.URL.Query().Get("from_seq"); raw != "" {
@@ -206,6 +209,7 @@ func handleStream(svc *Service, w http.ResponseWriter, r *http.Request, logger *
 	}
 }
 
+// writeSSEEvent emits one replication event frame and flushes it immediately to the client.
 func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, evt domain.ReplicationEvent) error {
 	payload, err := json.Marshal(evt)
 	if err != nil {

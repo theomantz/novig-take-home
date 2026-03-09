@@ -46,6 +46,7 @@ type replicaHealthRecord struct {
 	Health       ReplicaHealthClass
 }
 
+// classifyReplicaHealth maps heartbeat recency and connection state to healthy/stale/offline buckets.
 func classifyReplicaHealth(connected bool, ageMs int64, staleAfterMs int64, offlineAfterMs int64) ReplicaHealthClass {
 	if !connected {
 		return ReplicaHealthOffline
@@ -62,12 +63,14 @@ func classifyReplicaHealth(connected bool, ageMs int64, staleAfterMs int64, offl
 	return ReplicaHealthHealthy
 }
 
+// sortReplicaStatuses applies deterministic replica ordering for API responses and tests.
 func sortReplicaStatuses(statuses []ReplicaStatus) {
 	sort.Slice(statuses, func(i, j int) bool {
 		return statuses[i].ReplicaID < statuses[j].ReplicaID
 	})
 }
 
+// replicaTransitionLabel normalizes empty prior health to "unknown" for transition logs.
 func replicaTransitionLabel(prev ReplicaHealthClass) string {
 	if prev == "" {
 		return "unknown"
@@ -75,6 +78,7 @@ func replicaTransitionLabel(prev ReplicaHealthClass) string {
 	return string(prev)
 }
 
+// formatReplicaTransition renders health transitions as "from->to" labels.
 func formatReplicaTransition(prev ReplicaHealthClass, next ReplicaHealthClass) string {
 	return fmt.Sprintf("%s->%s", replicaTransitionLabel(prev), next)
 }

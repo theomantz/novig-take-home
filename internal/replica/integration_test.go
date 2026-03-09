@@ -20,6 +20,7 @@ import (
 
 const testMarketID = "market-news-001"
 
+// TestSingleReplicaConvergesWithCore verifies one replica reaches core's suspended state after a spike scenario.
 func TestSingleReplicaConvergesWithCore(t *testing.T) {
 	coreURL, shutdownCore := startCoreTestServer(t)
 	defer shutdownCore()
@@ -40,6 +41,7 @@ func TestSingleReplicaConvergesWithCore(t *testing.T) {
 	}, "replica did not converge to suspended state")
 }
 
+// TestTwoReplicasConvergeToSameState verifies concurrent replicas converge to the same applied status.
 func TestTwoReplicasConvergeToSameState(t *testing.T) {
 	coreURL, shutdownCore := startCoreTestServer(t)
 	defer shutdownCore()
@@ -63,6 +65,7 @@ func TestTwoReplicasConvergeToSameState(t *testing.T) {
 	}, "replicas did not converge to same suspended state")
 }
 
+// TestForcedSequenceGapTriggersSnapshotRecovery ensures seq gaps trigger snapshot refresh and recovery.
 func TestForcedSequenceGapTriggersSnapshotRecovery(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 
@@ -154,6 +157,7 @@ func TestForcedSequenceGapTriggersSnapshotRecovery(t *testing.T) {
 	}
 }
 
+// TestReplicaReconnectResumesFromCheckpoint ensures reconnect requests resume from durable checkpoint.
 func TestReplicaReconnectResumesFromCheckpoint(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 
@@ -485,6 +489,7 @@ func TestReplicaIdleStreamTimeoutReconnectsAndAppliesEvent(t *testing.T) {
 	}
 }
 
+// TestReplicaRestartBootstrapsFromSnapshotAndConverges verifies restart bootstrap from snapshot plus ongoing convergence.
 func TestReplicaRestartBootstrapsFromSnapshotAndConverges(t *testing.T) {
 	coreURL, shutdownCore := startCoreTestServer(t)
 	defer shutdownCore()
@@ -506,6 +511,7 @@ func TestReplicaRestartBootstrapsFromSnapshotAndConverges(t *testing.T) {
 	}, "restarted replica did not converge to reopen")
 }
 
+// startCoreTestServer starts an in-process core instance with short timings for integration tests.
 func startCoreTestServer(t *testing.T) (string, func()) {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -544,6 +550,7 @@ func startCoreTestServer(t *testing.T) (string, func()) {
 	return server.URL, shutdown
 }
 
+// startReplicaTestServer starts a replica service/server pair and returns an idempotent shutdown hook.
 func startReplicaTestServer(t *testing.T, id string, coreURL string) (*replica.Service, string, func()) {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -581,6 +588,7 @@ func startReplicaTestServer(t *testing.T, id string, coreURL string) (*replica.S
 	return svc, server.URL, shutdown
 }
 
+// postScenario invokes one core internal scenario endpoint and enforces HTTP success.
 func postScenario(t *testing.T, coreURL string, name string) {
 	t.Helper()
 	resp, err := http.Post(coreURL+"/internal/scenarios/"+name, "application/json", nil)
@@ -594,6 +602,7 @@ func postScenario(t *testing.T, coreURL string, name string) {
 	}
 }
 
+// waitFor polls fn until true or timeout, failing the test with msg on timeout.
 func waitFor(t *testing.T, timeout time.Duration, fn func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -606,6 +615,7 @@ func waitFor(t *testing.T, timeout time.Duration, fn func() bool, msg string) {
 	t.Fatalf("timeout: %s", msg)
 }
 
+// mustJSON marshals v and fails the test if marshaling is not possible.
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	payload, err := json.Marshal(v)

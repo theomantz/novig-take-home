@@ -26,6 +26,7 @@ type MarketState struct {
 	LastTransitionUnixMs   int64         `json:"last_transition_unix_ms"`
 }
 
+// IsEqual compares all persisted market fields used for replication state convergence.
 func (m MarketState) IsEqual(other MarketState) bool {
 	return m.MarketID == other.MarketID &&
 		m.Status == other.Status &&

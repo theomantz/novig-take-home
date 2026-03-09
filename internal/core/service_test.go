@@ -9,6 +9,7 @@ import (
 	"novig-take-home/internal/domain"
 )
 
+// TestEvaluateAllKeepsAuthoritativeStateWhenPersistFails verifies failed persistence does not advance sequence or mutate state.
 func TestEvaluateAllKeepsAuthoritativeStateWhenPersistFails(t *testing.T) {
 	store, err := NewEventStore(InMemoryDSN("core_persist_fail"))
 	if err != nil {

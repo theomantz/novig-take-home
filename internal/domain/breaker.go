@@ -12,6 +12,7 @@ type WindowMetrics struct {
 	LiabilityDelta30sCents int64
 }
 
+// DefaultBreakerConfig returns production defaults for trip thresholds and cooldown duration.
 func DefaultBreakerConfig() BreakerConfig {
 	return BreakerConfig{
 		BetCountThreshold:       120,
@@ -20,6 +21,7 @@ func DefaultBreakerConfig() BreakerConfig {
 	}
 }
 
+// ApplyBreaker updates metrics and returns the next state, emitted event type, and whether a transition occurred.
 func ApplyBreaker(nowUnixMs int64, prev MarketState, metrics WindowMetrics, cfg BreakerConfig) (MarketState, EventType, bool) {
 	next := prev
 	next.BetCount30s = metrics.BetCount30s
@@ -49,6 +51,7 @@ func ApplyBreaker(nowUnixMs int64, prev MarketState, metrics WindowMetrics, cfg 
 	return next, EventTypeMarketUpdated, false
 }
 
+// suspensionReason determines whether current metrics require a suspension and records the first trigger reason.
 func suspensionReason(metrics WindowMetrics, cfg BreakerConfig) (BreakerReason, bool) {
 	if metrics.BetCount30s >= cfg.BetCountThreshold {
 		return BreakerReasonBetRateSpike, true
@@ -59,6 +62,7 @@ func suspensionReason(metrics WindowMetrics, cfg BreakerConfig) (BreakerReason, 
 	return BreakerReasonNone, false
 }
 
+// suspendMarket applies suspension fields, including cooldown and transition metadata.
 func suspendMarket(state MarketState, nowUnixMs int64, reason BreakerReason, cfg BreakerConfig) MarketState {
 	state.Status = MarketStatusSuspended
 	state.CooldownUntilUnixMs = nowUnixMs + cfg.CooldownMs
@@ -67,6 +71,7 @@ func suspendMarket(state MarketState, nowUnixMs int64, reason BreakerReason, cfg
 	return state
 }
 
+// canReopenMarket reports whether cooldown elapsed and both breaker inputs are back below thresholds.
 func canReopenMarket(nowUnixMs int64, state MarketState, metrics WindowMetrics, cfg BreakerConfig) bool {
 	cooldownElapsed := nowUnixMs >= state.CooldownUntilUnixMs
 	signalsNormalized := metrics.BetCount30s < cfg.BetCountThreshold &&

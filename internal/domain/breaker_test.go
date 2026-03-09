@@ -2,6 +2,7 @@ package domain
 
 import "testing"
 
+// TestApplyBreakerTripsOnBetRateThreshold verifies bet-count threshold crossings suspend an open market.
 func TestApplyBreakerTripsOnBetRateThreshold(t *testing.T) {
 	cfg := DefaultBreakerConfig()
 	prev := MarketState{MarketID: "m1", Status: MarketStatusOpen}
@@ -21,6 +22,7 @@ func TestApplyBreakerTripsOnBetRateThreshold(t *testing.T) {
 	}
 }
 
+// TestApplyBreakerTripsOnLiabilityThreshold verifies liability threshold crossings suspend an open market.
 func TestApplyBreakerTripsOnLiabilityThreshold(t *testing.T) {
 	cfg := DefaultBreakerConfig()
 	prev := MarketState{MarketID: "m1", Status: MarketStatusOpen}
@@ -40,6 +42,7 @@ func TestApplyBreakerTripsOnLiabilityThreshold(t *testing.T) {
 	}
 }
 
+// TestApplyBreakerDoesNotTripBelowThresholds ensures elevated metrics below thresholds keep the market open.
 func TestApplyBreakerDoesNotTripBelowThresholds(t *testing.T) {
 	cfg := DefaultBreakerConfig()
 	prev := MarketState{MarketID: "m1", Status: MarketStatusOpen}
@@ -56,6 +59,7 @@ func TestApplyBreakerDoesNotTripBelowThresholds(t *testing.T) {
 	}
 }
 
+// TestApplyBreakerAutoReopensOnlyAfterCooldownAndNormalization covers reopen gating by time and normalized metrics.
 func TestApplyBreakerAutoReopensOnlyAfterCooldownAndNormalization(t *testing.T) {
 	cfg := DefaultBreakerConfig()
 	prev := MarketState{

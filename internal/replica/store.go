@@ -10,6 +10,7 @@ import (
 
 const inMemoryDSNOptions = "?mode=memory&cache=shared"
 
+// InMemoryDSN builds a shared-cache in-memory SQLite DSN namespaced by replica ID.
 func InMemoryDSN(replicaID string) string {
 	if replicaID == "" {
 		replicaID = "replica"
@@ -21,6 +22,7 @@ type Store struct {
 	db *sql.DB
 }
 
+// NewStore opens SQLite and initializes checkpoint/dedupe tables for replica consumption.
 func NewStore(dsn string) (*Store, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -34,6 +36,7 @@ func NewStore(dsn string) (*Store, error) {
 	return store, nil
 }
 
+// init creates required tables and seeds the singleton checkpoint row.
 func (s *Store) init() error {
 	stmts := []string{
 		`
@@ -61,6 +64,7 @@ func (s *Store) init() error {
 	return nil
 }
 
+// GetCheckpoint returns the durable last_applied_seq for stream resume.
 func (s *Store) GetCheckpoint() (int64, error) {
 	var seq int64
 	if err := s.db.QueryRow(`SELECT last_applied_seq FROM consumer_checkpoint WHERE id=1`).Scan(&seq); err != nil {
@@ -69,6 +73,7 @@ func (s *Store) GetCheckpoint() (int64, error) {
 	return seq, nil
 }
 
+// SetCheckpoint stores the provided sequence and timestamp in the singleton checkpoint row.
 func (s *Store) SetCheckpoint(seq int64, updatedAtMs int64) error {
 	_, err := s.db.Exec(`UPDATE consumer_checkpoint SET last_applied_seq=?, updated_at_ms=? WHERE id=1`, seq, updatedAtMs)
 	if err != nil {
@@ -77,6 +82,7 @@ func (s *Store) SetCheckpoint(seq int64, updatedAtMs int64) error {
 	return nil
 }
 
+// IsEventApplied reports whether eventID is already present in the dedupe table.
 func (s *Store) IsEventApplied(eventID string) (bool, error) {
 	var count int64
 	if err := s.db.QueryRow(`SELECT COUNT(1) FROM applied_events WHERE event_id=?`, eventID).Scan(&count); err != nil {
@@ -85,6 +91,7 @@ func (s *Store) IsEventApplied(eventID string) (bool, error) {
 	return count > 0, nil
 }
 
+// CommitAppliedEvent transactionally dedupes eventID and advances checkpoint when newly applied.
 func (s *Store) CommitAppliedEvent(eventID string, seq int64, tsMs int64) (bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -117,6 +124,7 @@ func (s *Store) CommitAppliedEvent(eventID string, seq int64, tsMs int64) (bool,
 	return true, nil
 }
 
+// Close releases the underlying SQLite connection.
 func (s *Store) Close() error {
 	return s.db.Close()
 }

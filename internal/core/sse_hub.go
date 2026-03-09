@@ -12,12 +12,14 @@ type SSEHub struct {
 	subscribers map[int]chan domain.ReplicationEvent
 }
 
+// NewSSEHub builds an in-memory fanout hub for live replication events.
 func NewSSEHub() *SSEHub {
 	return &SSEHub{
 		subscribers: make(map[int]chan domain.ReplicationEvent),
 	}
 }
 
+// Subscribe registers a buffered subscriber and returns an unsubscribe function that closes its channel.
 func (h *SSEHub) Subscribe(buffer int) (chan domain.ReplicationEvent, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -39,6 +41,7 @@ func (h *SSEHub) Subscribe(buffer int) (chan domain.ReplicationEvent, func()) {
 	return ch, unsubscribe
 }
 
+// Broadcast sends evt to all subscribers and evicts any subscriber whose channel is back-pressured.
 func (h *SSEHub) Broadcast(evt domain.ReplicationEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

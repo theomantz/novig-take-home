@@ -14,6 +14,7 @@ import (
 	"novig-take-home/internal/domain"
 )
 
+// main boots the core service, starts the breaker loop, and serves HTTP until shutdown.
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -65,6 +66,7 @@ func main() {
 	}
 }
 
+// getEnv returns fallback when key is unset or empty.
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -72,6 +74,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// getEnvInt parses key as an integer and falls back on parse failure or empty input.
 func getEnvInt(key string, fallback int) int {
 	if raw := os.Getenv(key); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil {

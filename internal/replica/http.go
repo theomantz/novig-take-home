@@ -9,6 +9,7 @@ import (
 	"novig-take-home/internal/shared"
 )
 
+// NewHandler exposes read-only replica APIs for market snapshots, history, and replication status.
 func NewHandler(svc *Service) http.Handler {
 	mux := http.NewServeMux()
 

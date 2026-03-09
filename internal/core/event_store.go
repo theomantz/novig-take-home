@@ -12,6 +12,7 @@ import (
 
 const inMemoryDSNOptions = "?mode=memory&cache=shared"
 
+// InMemoryDSN builds a shared-cache in-memory SQLite DSN for core event storage tests and local runs.
 func InMemoryDSN(dbName string) string {
 	if dbName == "" {
 		dbName = "core_events"
@@ -23,6 +24,7 @@ type EventStore struct {
 	db *sql.DB
 }
 
+// NewEventStore opens SQLite and ensures the event_log schema exists before use.
 func NewEventStore(dsn string) (*EventStore, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -37,6 +39,7 @@ func NewEventStore(dsn string) (*EventStore, error) {
 	return store, nil
 }
 
+// init creates tables required for durable replication event persistence.
 func (s *EventStore) init() error {
 	_, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS event_log (
@@ -54,6 +57,7 @@ func (s *EventStore) init() error {
 	return nil
 }
 
+// Insert appends one replication event and relies on unique keys for duplicate protection.
 func (s *EventStore) Insert(event domain.ReplicationEvent) error {
 	_, err := s.db.Exec(`
 		INSERT INTO event_log(seq, event_id, ts_ms, event_type, market_id, payload_json)
@@ -65,6 +69,7 @@ func (s *EventStore) Insert(event domain.ReplicationEvent) error {
 	return nil
 }
 
+// EventsFromSeq returns events with seq >= fromSeq in strictly ascending order.
 func (s *EventStore) EventsFromSeq(fromSeq int64) ([]domain.ReplicationEvent, error) {
 	rows, err := s.db.Query(`
 		SELECT seq, event_id, ts_ms, event_type, market_id, payload_json
@@ -95,6 +100,7 @@ func (s *EventStore) EventsFromSeq(fromSeq int64) ([]domain.ReplicationEvent, er
 	return out, nil
 }
 
+// LastSeq returns the highest persisted sequence number, or zero when no events exist.
 func (s *EventStore) LastSeq() (int64, error) {
 	var last sql.NullInt64
 	if err := s.db.QueryRow(`SELECT MAX(seq) FROM event_log`).Scan(&last); err != nil {
@@ -106,6 +112,7 @@ func (s *EventStore) LastSeq() (int64, error) {
 	return last.Int64, nil
 }
 
+// Close releases the underlying SQLite connection.
 func (s *EventStore) Close() error {
 	return s.db.Close()
 }

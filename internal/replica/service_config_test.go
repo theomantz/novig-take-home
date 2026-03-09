@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// TestNewServiceDefaultsNonPositiveDurations checks defensive defaults for invalid timing settings.
 func TestNewServiceDefaultsNonPositiveDurations(t *testing.T) {
 	store, err := NewStore(InMemoryDSN(fmt.Sprintf("service_config_defaults_%d", time.Now().UnixNano())))
 	if err != nil {
