@@ -11,7 +11,7 @@ The breaker logic is based on bet-flow signals (bet velocity and liability accel
 - [Prerequisites](#prerequisites)
 - [Detailed Setup](#detailed-setup)
 - [Run the System](#run-the-system)
-- [Test Script](#test-script)
+- [Makefile Targets](#makefile-targets)
 - [Manual API Testing with curl](#manual-api-testing-with-curl)
 - [API Surface](#api-surface)
 - [Configuration](#configuration)
@@ -105,10 +105,10 @@ go version
 
 ### 4. Baseline validation
 
-Run the repository test script:
+Run baseline validation with `make`:
 
 ```bash
-scripts/test.sh
+make test
 ```
 
 This runs, in order:
@@ -116,6 +116,12 @@ This runs, in order:
 1. `go test ./...`
 2. `go vet ./...`
 3. `go test -race ./...`
+
+If you want to run commands directly (without `nix develop -c`), set:
+
+```bash
+make test USE_NIX=false
+```
 
 ## Run the System
 
@@ -151,24 +157,27 @@ Terminal 3 (replica 2):
 REPLICA_ID=r2 REPLICA_PORT=8082 CORE_BASE_URL=http://127.0.0.1:8080 go run ./cmd/replica
 ```
 
-## Test Script
+## Makefile Targets
 
-The repository includes `scripts/test.sh`:
-
-```bash
-scripts/test.sh --help
-```
-
-Options:
-
-- `--no-nix`: run commands directly instead of `nix develop -c ...`
-- `--with-demo`: also run `go run ./cmd/demo` after all validation checks
-
-Example with demo:
+The repository includes a `Makefile`:
 
 ```bash
-scripts/test.sh --with-demo
+make help
 ```
+
+Primary targets:
+
+- `make test`: run `go test ./...`, `go vet ./...`, and `go test -race ./...`
+- `make test-with-demo`: run `make test`, then `go run ./cmd/demo`
+- `make unit-test`: run `go test ./...`
+- `make vet`: run `go vet ./...`
+- `make test-race`: run `go test -race ./...`
+- `make demo`: run `go run ./cmd/demo`
+
+Nix behavior:
+
+- Default (`USE_NIX=auto`): uses `nix develop -c` when `nix` is available and you are not already in a Nix shell
+- `USE_NIX=false`: always run commands directly
 
 Optional benchmark command (used for event-log sequence read behavior):
 
