@@ -50,3 +50,10 @@ Capture repeat issues, root causes, and proven fixes for this codebase.
 - Root cause: `consumeStream` returning `io.EOF` flowed through generic disconnect handling that always updated `last_error`.
 - Fix: treat `io.EOF` as a normal reconnect signal (log + backoff + reconnect) without setting `last_error`.
 - Prevention: reserve `last_error` for actionable failures (timeout, decode/validation, non-200 responses), not expected stream lifecycle events.
+
+### 2026-03-09 - Nix and host Go versions can diverge during docs validation
+- Context: README command verification for Nix and native tooling paths.
+- Symptom: `nix develop -c go version` and `go version` reported different Go versions.
+- Root cause: Nix shells pin their own toolchain independently from host-installed Go.
+- Fix: validate each path against the documented minimum (`Go 1.22+`) instead of expecting identical version strings.
+- Prevention: when validating README setup commands, treat Nix vs host Go version drift as expected unless either path violates minimum requirements.
