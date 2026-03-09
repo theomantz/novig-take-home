@@ -123,6 +123,9 @@ func TestExponentialBackoffDurationCapsAtConfiguredMaximum(t *testing.T) {
 	if got := exponentialBackoffDuration(initial, capDelay, 8); got != capDelay {
 		t.Fatalf("expected cap to hold at %s, got %s", capDelay, got)
 	}
+	if got := exponentialBackoffDuration(initial, capDelay, 40); got != capDelay {
+		t.Fatalf("expected cap to hold under high attempt count at %s, got %s", capDelay, got)
+	}
 }
 
 func TestStatusIncludesBootstrappedAndLastError(t *testing.T) {

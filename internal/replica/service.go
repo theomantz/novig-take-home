@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"maps"
-	"math"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -453,10 +452,16 @@ func exponentialBackoffDuration(initial time.Duration, cap time.Duration, attemp
 		return initial
 	}
 
-	multiplier := math.Pow(2, float64(attempt))
-	delay := time.Duration(float64(initial) * multiplier)
-	if delay > cap {
-		return cap
+	delay := initial
+	for i := 0; i < attempt; i++ {
+		if delay >= cap {
+			return cap
+		}
+		// Cap before doubling to avoid duration overflow on large attempt counts.
+		if delay > cap/2 {
+			return cap
+		}
+		delay *= 2
 	}
 	return delay
 }
