@@ -57,3 +57,10 @@ Capture repeat issues, root causes, and proven fixes for this codebase.
 - Root cause: Nix shells pin their own toolchain independently from host-installed Go.
 - Fix: validate each path against the documented minimum (`Go 1.22+`) instead of expecting identical version strings.
 - Prevention: when validating README setup commands, treat Nix vs host Go version drift as expected unless either path violates minimum requirements.
+
+### 2026-03-09 - Cancel demo run context before deferred HTTP shutdown
+- Context: `cmd/demo` scripted convergence shutdown sequence.
+- Symptom: demo exit could emit late heartbeat errors (and appear stuck/noisy) right after successful completion.
+- Root cause: signal context cancellation happened in a deferred call after HTTP server shutdown had already started.
+- Fix: call `stop()` before returning in non-hold mode so replica/core loops exit before deferred server shutdown.
+- Prevention: for multi-service demos/tests, cancel shared run contexts before shutting down servers that those goroutines depend on.
