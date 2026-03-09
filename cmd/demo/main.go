@@ -103,6 +103,7 @@ func main() {
 		logger.Error("failed to trigger normalize", "error", err)
 		os.Exit(1)
 	}
+	fmt.Println("normalize triggered; waiting for cooldown (~60s) before reopen verification")
 
 	if err := waitStatus(ctx, client, replica1URL, defaultMarketID, domain.MarketStatusOpen, 75*time.Second); err != nil {
 		logger.Error("replica1 did not reopen", "error", err)
@@ -115,6 +116,8 @@ func main() {
 
 	fmt.Println("verified: both replicas converged back to OPEN after cooldown")
 	if !*hold {
+		// Cancel service loops before deferred HTTP shutdown to avoid lingering stream/heartbeat work.
+		stop()
 		return
 	}
 
