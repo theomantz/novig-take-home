@@ -4,7 +4,6 @@ This document captures the current benchmark-backed guidance for `event_log` rea
 
 Sources:
 
-- `docs/benchmarks/event_log_seq_reads.md`
 - `docs/benchmarks/event_log_seq_reads_run_2026-03-07.txt`
 - `cmd/eventlog-bench/main.go`
 
