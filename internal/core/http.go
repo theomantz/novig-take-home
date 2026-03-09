@@ -13,6 +13,8 @@ import (
 	"novig-take-home/internal/shared"
 )
 
+var streamHeartbeatInterval = 15 * time.Second
+
 func NewHandler(svc *Service, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -161,7 +163,7 @@ func handleStream(svc *Service, w http.ResponseWriter, r *http.Request, logger *
 		nextSeq = evt.Seq + 1
 	}
 
-	heartbeat := time.NewTicker(15 * time.Second)
+	heartbeat := time.NewTicker(streamHeartbeatInterval)
 	defer heartbeat.Stop()
 
 	for {
