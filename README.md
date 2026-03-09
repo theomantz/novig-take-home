@@ -162,7 +162,7 @@ scripts/test.sh --help
 Options:
 
 - `--no-nix`: run commands directly instead of `nix develop -c ...`
-- `--with-demo`: also run `go run ./cmd/demo` after tests
+- `--with-demo`: also run `go run ./cmd/demo` after all validation checks
 
 Example with demo:
 
