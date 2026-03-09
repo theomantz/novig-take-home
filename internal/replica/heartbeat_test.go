@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// TestSendHeartbeatPostsReplicaStatus verifies sendHeartbeat posts the expected replica status payload.
 func TestSendHeartbeatPostsReplicaStatus(t *testing.T) {
 	received := make(chan heartbeatRequest, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +78,7 @@ func TestSendHeartbeatPostsReplicaStatus(t *testing.T) {
 	}
 }
 
+// TestSendHeartbeatReturnsErrorOnNonSuccessStatus verifies non-2xx heartbeat responses surface as errors.
 func TestSendHeartbeatReturnsErrorOnNonSuccessStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

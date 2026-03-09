@@ -2,6 +2,7 @@ package domain
 
 import "testing"
 
+// TestMarketStateIsEqual confirms IsEqual compares every replicated MarketState field.
 func TestMarketStateIsEqual(t *testing.T) {
 	base := MarketState{
 		MarketID:               "market-1",

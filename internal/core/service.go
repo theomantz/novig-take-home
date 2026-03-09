@@ -43,6 +43,7 @@ type Service struct {
 	replicas     map[string]replicaHealthRecord
 }
 
+// NewService normalizes config defaults and loads current sequence state from durable storage.
 func NewService(store *EventStore, cfg ServiceConfig) (*Service, error) {
 	if cfg.Breaker.BetCountThreshold == 0 {
 		cfg.Breaker = domain.DefaultBreakerConfig()
@@ -97,6 +98,7 @@ func NewService(store *EventStore, cfg ServiceConfig) (*Service, error) {
 	return svc, nil
 }
 
+// Start runs periodic breaker evaluation until context cancellation.
 func (s *Service) Start(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.TickInterval)
 	defer ticker.Stop()
@@ -111,6 +113,7 @@ func (s *Service) Start(ctx context.Context) {
 	}
 }
 
+// IngestSignal appends a signal to the market rolling window and prunes expired points.
 func (s *Service) IngestSignal(in domain.SignalInput) {
 	nowMs := s.cfg.Now().UnixMilli()
 	if in.TsUnixMs == 0 {
@@ -133,6 +136,7 @@ func (s *Service) IngestSignal(in domain.SignalInput) {
 	s.pruneSignalsLocked(in.MarketID, nowMs)
 }
 
+// ClearSignals drops all buffered rolling-window inputs for a market.
 func (s *Service) ClearSignals(marketID string) {
 	nowMs := s.cfg.Now().UnixMilli()
 	if marketID == "" {
@@ -146,6 +150,7 @@ func (s *Service) ClearSignals(marketID string) {
 	s.signalWindow[marketID] = nil
 }
 
+// Snapshot returns a copy of authoritative market state and current last sequence.
 func (s *Service) Snapshot() domain.SnapshotResponse {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -159,20 +164,24 @@ func (s *Service) Snapshot() domain.SnapshotResponse {
 	}
 }
 
+// LastSeq returns the latest authoritative sequence.
 func (s *Service) LastSeq() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.lastSeq
 }
 
+// EventsFromSeq proxies durable event-log reads for SSE backlog and recovery flows.
 func (s *Service) EventsFromSeq(fromSeq int64) ([]domain.ReplicationEvent, error) {
 	return s.store.EventsFromSeq(fromSeq)
 }
 
+// Subscribe registers a buffered live-event consumer and returns its unsubscribe callback.
 func (s *Service) Subscribe(buffer int) (chan domain.ReplicationEvent, func()) {
 	return s.hub.Subscribe(buffer)
 }
 
+// evaluateAll computes breaker transitions for every known market and emits resulting events.
 func (s *Service) evaluateAll(nowMs int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -251,7 +260,7 @@ func (s *Service) pruneSignalsLocked(marketID string, nowMs int64) {
 	s.signalWindow[marketID] = filtered
 }
 
-// emitEventLocked persists and broadcasts a replication event for a market state update.
+// emitEventLocked persists then broadcasts a state-change event; persistence failure leaves state unchanged.
 // Must be called with s.mu held.
 func (s *Service) emitEventLocked(eventType domain.EventType, marketID string, state domain.MarketState) bool {
 	payload, err := json.Marshal(state)
@@ -290,6 +299,7 @@ func (s *Service) emitEventLocked(eventType domain.EventType, marketID string, s
 	return true
 }
 
+// RecordReplicaHeartbeat stores the latest replica heartbeat and refreshes its derived health class.
 func (s *Service) RecordReplicaHeartbeat(in ReplicaHeartbeat) {
 	if in.ReplicaID == "" {
 		return
@@ -313,6 +323,7 @@ func (s *Service) RecordReplicaHeartbeat(in ReplicaHeartbeat) {
 	s.updateReplicaHealthLocked(in.ReplicaID, nowMs)
 }
 
+// ReplicaStatuses returns lag-aware, sorted replica health status as seen by core.
 func (s *Service) ReplicaStatuses() ReplicasStatusResponse {
 	nowMs := s.cfg.Now().UnixMilli()
 
@@ -348,12 +359,14 @@ func (s *Service) ReplicaStatuses() ReplicasStatusResponse {
 	}
 }
 
+// refreshReplicaHealthLocked recalculates health for all known replicas.
 func (s *Service) refreshReplicaHealthLocked(nowMs int64) {
 	for replicaID := range s.replicas {
 		s.updateReplicaHealthLocked(replicaID, nowMs)
 	}
 }
 
+// updateReplicaHealthLocked recomputes one replica's health and logs transitions.
 func (s *Service) updateReplicaHealthLocked(replicaID string, nowMs int64) {
 	record, ok := s.replicas[replicaID]
 	if !ok {

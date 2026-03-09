@@ -65,6 +65,7 @@ type Service struct {
 	reconnectAttempts int
 }
 
+// NewService validates config defaults and restores last applied sequence from checkpoint storage.
 func NewService(store *Store, cfg ServiceConfig) (*Service, error) {
 	if cfg.ID == "" {
 		cfg.ID = "replica-1"
@@ -119,6 +120,7 @@ func NewService(store *Store, cfg ServiceConfig) (*Service, error) {
 	}, nil
 }
 
+// Start keeps the replica synchronized by bootstrapping, consuming stream events, and reconnecting on failure.
 func (s *Service) Start(ctx context.Context) {
 	go s.reportHeartbeats(ctx)
 
@@ -165,6 +167,7 @@ func (s *Service) Start(ctx context.Context) {
 	}
 }
 
+// ensureBootstrapped performs one-time snapshot bootstrap before stream consumption.
 func (s *Service) ensureBootstrapped(ctx context.Context) error {
 	s.mu.RLock()
 	bootstrapped := s.bootstrapped
@@ -176,6 +179,7 @@ func (s *Service) ensureBootstrapped(ctx context.Context) error {
 	return s.refreshFromSnapshot(ctx)
 }
 
+// refreshFromSnapshot replaces in-memory state from /snapshot and updates durable checkpoint atomically.
 func (s *Service) refreshFromSnapshot(ctx context.Context) error {
 	snapshot, err := s.fetchSnapshot(ctx)
 	if err != nil {
@@ -213,6 +217,7 @@ func (s *Service) refreshFromSnapshot(ctx context.Context) error {
 	return nil
 }
 
+// fetchSnapshot requests and decodes core's full snapshot payload.
 func (s *Service) fetchSnapshot(ctx context.Context) (domain.SnapshotResponse, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, s.cfg.SnapshotTimeout)
 	defer cancel()
@@ -243,6 +248,7 @@ func (s *Service) fetchSnapshot(ctx context.Context) (domain.SnapshotResponse, e
 	return snapshot, nil
 }
 
+// consumeStream connects to SSE from last_applied_seq+1 and forwards each replication frame to processEvent.
 func (s *Service) consumeStream(ctx context.Context) error {
 	fromSeq := s.LastAppliedSeq() + 1
 
@@ -317,6 +323,7 @@ func (s *Service) consumeStream(ctx context.Context) error {
 	return io.EOF
 }
 
+// processEvent enforces dedupe and strict sequence ordering, then commits and applies an event.
 func (s *Service) processEvent(evt domain.ReplicationEvent) error {
 	if err := validateEventEnvelope(evt); err != nil {
 		return err
@@ -372,6 +379,7 @@ func (s *Service) processEvent(evt domain.ReplicationEvent) error {
 	return nil
 }
 
+// updateCoreLastSeq tracks the highest sequence observed from core, including duplicate events.
 func (s *Service) updateCoreLastSeq(seq int64) {
 	s.mu.Lock()
 	if seq > s.coreLastSeq {
@@ -380,6 +388,7 @@ func (s *Service) updateCoreLastSeq(seq int64) {
 	s.mu.Unlock()
 }
 
+// waitBackoff blocks for reconnect delay unless context cancels first.
 func (s *Service) waitBackoff(ctx context.Context) {
 	t := time.NewTimer(s.nextReconnectDelay())
 	defer t.Stop()
@@ -570,12 +579,14 @@ func (s *Service) resetReconnectBackoff() {
 	s.mu.Unlock()
 }
 
+// setConnected updates the current stream connectivity flag.
 func (s *Service) setConnected(v bool) {
 	s.mu.Lock()
 	s.connected = v
 	s.mu.Unlock()
 }
 
+// reportHeartbeats sends an immediate heartbeat and then sends periodically until shutdown.
 func (s *Service) reportHeartbeats(ctx context.Context) {
 	if err := s.sendHeartbeat(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		s.cfg.Logger.Warn("replica heartbeat failed", "replica_id", s.cfg.ID, "error", err)
@@ -604,6 +615,7 @@ type heartbeatRequest struct {
 	LastSyncAt     int64  `json:"last_sync_at"`
 }
 
+// sendHeartbeat posts replica status to core's heartbeat endpoint with a bounded request timeout.
 func (s *Service) sendHeartbeat(ctx context.Context) error {
 	status := s.Status()
 	payload, err := json.Marshal(heartbeatRequest{
@@ -640,6 +652,7 @@ func (s *Service) sendHeartbeat(ctx context.Context) error {
 	return nil
 }
 
+// Markets returns a snapshot copy of current replica market states.
 func (s *Service) Markets() []domain.MarketState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -650,6 +663,7 @@ func (s *Service) Markets() []domain.MarketState {
 	return out
 }
 
+// MarketByID returns the latest replicated market state for id.
 func (s *Service) MarketByID(id string) (domain.MarketState, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -657,6 +671,7 @@ func (s *Service) MarketByID(id string) (domain.MarketState, bool) {
 	return market, ok
 }
 
+// MarketHistory returns a copy of applied events for one market in apply order.
 func (s *Service) MarketHistory(id string) []domain.ReplicationEvent {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -666,12 +681,14 @@ func (s *Service) MarketHistory(id string) []domain.ReplicationEvent {
 	return out
 }
 
+// LastAppliedSeq returns the latest successfully applied sequence number.
 func (s *Service) LastAppliedSeq() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.lastAppliedSeq
 }
 
+// Status returns replica connectivity, sequence lag, and last-sync metadata.
 func (s *Service) Status() Status {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

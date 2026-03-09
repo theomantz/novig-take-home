@@ -21,6 +21,7 @@ import (
 
 const defaultMarketID = "market-news-001"
 
+// main runs an end-to-end convergence demo against one core and two replicas.
 func main() {
 	hold := flag.Bool("hold", false, "keep services running after scripted checks")
 	flag.Parse()
@@ -126,6 +127,7 @@ type runningReplica struct {
 	server *http.Server
 }
 
+// startReplica provisions a replica store/service pair and serves its HTTP read API.
 func startReplica(ctx context.Context, id string, coreURL string, logger *slog.Logger) (*runningReplica, string, error) {
 	dsn := replica.InMemoryDSN(id)
 	store, err := replica.NewStore(dsn)
@@ -155,6 +157,7 @@ func startReplica(ctx context.Context, id string, coreURL string, logger *slog.L
 	return &runningReplica{store: store, server: srv}, baseURL, nil
 }
 
+// startHTTPServer starts handler on a random localhost port and returns its base URL.
 func startHTTPServer(handler http.Handler) (*http.Server, string, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -167,12 +170,14 @@ func startHTTPServer(handler http.Handler) (*http.Server, string, error) {
 	return srv, "http://" + ln.Addr().String(), nil
 }
 
+// shutdownServer performs a bounded graceful shutdown for demo HTTP servers.
 func shutdownServer(srv *http.Server) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
 }
 
+// post issues a POST with no body and enforces a 2xx response.
 func post(client *http.Client, target string) error {
 	req, err := http.NewRequest(http.MethodPost, target, nil)
 	if err != nil {
@@ -189,6 +194,7 @@ func post(client *http.Client, target string) error {
 	return nil
 }
 
+// waitReplicaConnected polls /replica/status until Connected becomes true or timeout elapses.
 func waitReplicaConnected(ctx context.Context, client *http.Client, baseURL string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -209,6 +215,7 @@ func waitReplicaConnected(ctx context.Context, client *http.Client, baseURL stri
 	}
 }
 
+// waitStatus polls a replica market until it reaches target status or the timeout expires.
 func waitStatus(ctx context.Context, client *http.Client, replicaURL string, marketID string, target domain.MarketStatus, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -229,6 +236,7 @@ func waitStatus(ctx context.Context, client *http.Client, replicaURL string, mar
 	}
 }
 
+// getMarket fetches a replica market snapshot and decodes it as MarketState.
 func getMarket(client *http.Client, baseURL string, marketID string) (domain.MarketState, error) {
 	resp, err := client.Get(baseURL + "/markets/" + marketID)
 	if err != nil {
@@ -245,6 +253,7 @@ func getMarket(client *http.Client, baseURL string, marketID string) (domain.Mar
 	return market, nil
 }
 
+// getReplicaStatus fetches and decodes the replica liveness/lag status document.
 func getReplicaStatus(client *http.Client, baseURL string) (replica.Status, error) {
 	resp, err := client.Get(baseURL + "/replica/status")
 	if err != nil {

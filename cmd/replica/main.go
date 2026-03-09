@@ -13,6 +13,7 @@ import (
 	"novig-take-home/internal/replica"
 )
 
+// main boots a replica service, starts replication, and serves read-only HTTP APIs.
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -68,6 +69,7 @@ func main() {
 	}
 }
 
+// getEnv returns fallback when key is unset or empty.
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -75,6 +77,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// getEnvInt parses key as an integer and falls back on parse failure or empty input.
 func getEnvInt(key string, fallback int) int {
 	if raw := os.Getenv(key); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil {

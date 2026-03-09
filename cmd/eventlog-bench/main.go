@@ -48,6 +48,7 @@ type durationStats struct {
 	p95 time.Duration
 }
 
+// main benchmarks read-heavy event_log queries across index variants and row volumes.
 func main() {
 	volumesFlag := flag.String("rows", "10000,100000,250000", "comma-separated event_log row counts")
 	rowIterations := flag.Int("row-iterations", 5000, "iterations for scalar queries")
@@ -161,6 +162,7 @@ func main() {
 	}
 }
 
+// buildDB creates an isolated in-memory SQLite database, applies schema/index DDL, and seeds events.
 func buildDB(rowCount int, v variant) (*sql.DB, func(), error) {
 	dsn := fmt.Sprintf("file:eventlog_bench_%s_%d?mode=memory&cache=shared", v.name, time.Now().UnixNano())
 	db, err := sql.Open("sqlite", dsn)
@@ -192,6 +194,7 @@ func buildDB(rowCount int, v variant) (*sql.DB, func(), error) {
 	return db, cleanup, nil
 }
 
+// seedEvents inserts deterministic synthetic events in one transaction for stable benchmark inputs.
 func seedEvents(db *sql.DB, rowCount int) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -222,6 +225,7 @@ func seedEvents(db *sql.DB, rowCount int) error {
 	return nil
 }
 
+// benchmarkQuery executes query repeatedly and returns latency distribution statistics.
 func benchmarkQuery(db *sql.DB, kind string, query string, iterations int, args ...any) (durationStats, error) {
 	durations := make([]time.Duration, 0, iterations)
 
@@ -269,6 +273,7 @@ func benchmarkQuery(db *sql.DB, kind string, query string, iterations int, args 
 	return computeStats(durations), nil
 }
 
+// explainQueryPlan returns SQLite EXPLAIN QUERY PLAN detail lines for the given statement.
 func explainQueryPlan(db *sql.DB, query string, args ...any) ([]string, error) {
 	explainSQL := "EXPLAIN QUERY PLAN " + query
 	rows, err := db.Query(explainSQL, args...)
@@ -292,6 +297,7 @@ func explainQueryPlan(db *sql.DB, query string, args ...any) ([]string, error) {
 	return details, nil
 }
 
+// computeStats calculates avg/p50/p95 from a duration sample.
 func computeStats(durations []time.Duration) durationStats {
 	if len(durations) == 0 {
 		return durationStats{}
@@ -316,6 +322,7 @@ func computeStats(durations []time.Duration) durationStats {
 	}
 }
 
+// percentileIndex maps a percentile to a valid zero-based index using ceil-style ranking.
 func percentileIndex(length int, percentile float64) int {
 	if length == 0 {
 		return 0
@@ -330,6 +337,7 @@ func percentileIndex(length int, percentile float64) int {
 	return idx
 }
 
+// parseCSVInts parses a comma-separated integer list and ignores empty elements.
 func parseCSVInts(raw string) ([]int, error) {
 	parts := strings.Split(raw, ",")
 	out := make([]int, 0, len(parts))
@@ -347,6 +355,7 @@ func parseCSVInts(raw string) ([]int, error) {
 	return out, nil
 }
 
+// formatDuration renders benchmark durations as ms when possible, otherwise µs.
 func formatDuration(d time.Duration) string {
 	if d >= time.Millisecond {
 		return fmt.Sprintf("%.2fms", float64(d)/float64(time.Millisecond))
@@ -354,6 +363,7 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.2fµs", float64(d)/float64(time.Microsecond))
 }
 
+// max returns the larger integer.
 func max(a, b int) int {
 	if a > b {
 		return a
@@ -361,6 +371,7 @@ func max(a, b int) int {
 	return b
 }
 
+// fail prints a formatted error to stderr and exits with status 1.
 func fail(format string, args ...any) {
 	_, _ = fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)

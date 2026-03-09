@@ -10,6 +10,7 @@ import (
 	"novig-take-home/internal/domain"
 )
 
+// TestDuplicateEventIDIsIdempotentNoOp ensures replaying the same event ID does not advance replica state.
 func TestDuplicateEventIDIsIdempotentNoOp(t *testing.T) {
 	svc, store := newReplicaProcessEventTestService(t)
 	defer store.Close()
