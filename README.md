@@ -118,6 +118,18 @@ Replica heartbeat cadence defaults to `2s` and is tunable via:
 - `REPLICA_HEARTBEAT_INTERVAL_MS`
 - `REPLICA_HEARTBEAT_TIMEOUT_MS`
 
+Replica connectivity/recovery behavior is tunable via:
+
+- `REPLICA_RECONNECT_BACKOFF_INITIAL_MS` (default `500`)
+- `REPLICA_RECONNECT_BACKOFF_MAX_MS` (default `5000`)
+- `REPLICA_SNAPSHOT_TIMEOUT_MS` (default `3000`)
+- `REPLICA_STREAM_IDLE_TIMEOUT_MS` (default `45000`)
+
+Replica `GET /replica/status` also reports:
+
+- `bootstrapped` (whether at least one valid snapshot sync has completed)
+- `last_error` (most recent bootstrap/stream/snapshot error string, empty on healthy steady-state)
+
 ## Data Flow and Consistency
 
 1. Core ingests synthetic/manual bet-flow signals.
@@ -135,6 +147,7 @@ Replica heartbeat cadence defaults to `2s` and is tunable via:
 - At-least-once delivery from stream/reconnect behavior
 - Idempotency via `event_id` dedupe (`INSERT OR IGNORE` path)
 - Event ordering enforced by sequence checks
+- Replica rejects malformed events/snapshots (invalid IDs/types/payload mismatch or regressed snapshot `last_seq`)
 
 ## Trade-offs
 

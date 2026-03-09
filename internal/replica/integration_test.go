@@ -250,6 +250,241 @@ func TestReplicaReconnectResumesFromCheckpoint(t *testing.T) {
 	}
 }
 
+func TestReplicaDuplicateThenGapAcrossReconnectRecoversWithSnapshot(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	var snapshotCalls atomic.Int32
+	var streamCalls atomic.Int32
+	var firstFromSeq atomic.Int64
+	var secondFromSeq atomic.Int64
+	var thirdFromSeq atomic.Int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/snapshot":
+			call := snapshotCalls.Add(1)
+			if call == 1 {
+				_ = json.NewEncoder(w).Encode(domain.SnapshotResponse{
+					LastSeq: 0,
+					Markets: map[string]domain.MarketState{testMarketID: {
+						MarketID: testMarketID,
+						Status:   domain.MarketStatusOpen,
+					}},
+				})
+				return
+			}
+
+			_ = json.NewEncoder(w).Encode(domain.SnapshotResponse{
+				LastSeq: 3,
+				Markets: map[string]domain.MarketState{testMarketID: {
+					MarketID: testMarketID,
+					Status:   domain.MarketStatusSuspended,
+				}},
+			})
+		case "/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			fromSeq, _ := strconv.ParseInt(r.URL.Query().Get("from_seq"), 10, 64)
+			call := streamCalls.Add(1)
+
+			switch call {
+			case 1:
+				firstFromSeq.Store(fromSeq)
+				evt := domain.ReplicationEvent{
+					Seq:       1,
+					EventID:   "dup-gap-1",
+					TsUnixMs:  time.Now().UnixMilli(),
+					EventType: domain.EventTypeMarketUpdated,
+					MarketID:  testMarketID,
+					Payload:   mustJSON(t, domain.MarketState{MarketID: testMarketID, Status: domain.MarketStatusOpen}),
+				}
+				data, _ := json.Marshal(evt)
+				_, _ = io.WriteString(w, "data: "+string(data)+"\n\n")
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+				return
+			case 2:
+				secondFromSeq.Store(fromSeq)
+				duplicate := domain.ReplicationEvent{
+					Seq:       1,
+					EventID:   "dup-gap-1",
+					TsUnixMs:  time.Now().UnixMilli(),
+					EventType: domain.EventTypeMarketUpdated,
+					MarketID:  testMarketID,
+					Payload:   mustJSON(t, domain.MarketState{MarketID: testMarketID, Status: domain.MarketStatusOpen}),
+				}
+				gap := domain.ReplicationEvent{
+					Seq:       3,
+					EventID:   "dup-gap-3",
+					TsUnixMs:  time.Now().UnixMilli(),
+					EventType: domain.EventTypeMarketSuspended,
+					MarketID:  testMarketID,
+					Payload:   mustJSON(t, domain.MarketState{MarketID: testMarketID, Status: domain.MarketStatusSuspended}),
+				}
+				dupData, _ := json.Marshal(duplicate)
+				gapData, _ := json.Marshal(gap)
+				_, _ = io.WriteString(w, "data: "+string(dupData)+"\n\n")
+				_, _ = io.WriteString(w, "data: "+string(gapData)+"\n\n")
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+				return
+			default:
+				thirdFromSeq.Store(fromSeq)
+				evt := domain.ReplicationEvent{
+					Seq:       4,
+					EventID:   "dup-gap-4",
+					TsUnixMs:  time.Now().UnixMilli(),
+					EventType: domain.EventTypeMarketReopened,
+					MarketID:  testMarketID,
+					Payload:   mustJSON(t, domain.MarketState{MarketID: testMarketID, Status: domain.MarketStatusOpen}),
+				}
+				data, _ := json.Marshal(evt)
+				_, _ = io.WriteString(w, "data: "+string(data)+"\n\n")
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+				return
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	store, err := replica.NewStore(replica.InMemoryDSN(fmt.Sprintf("dup_gap_reconnect_%d", time.Now().UnixNano())))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	svc, err := replica.NewService(store, replica.ServiceConfig{
+		ID:               "dup-gap",
+		CoreBaseURL:      server.URL,
+		Logger:           logger,
+		ReconnectBackoff: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go svc.Start(ctx)
+
+	waitFor(t, 3*time.Second, func() bool {
+		market, ok := svc.MarketByID(testMarketID)
+		return ok && svc.LastAppliedSeq() >= 4 && market.Status == domain.MarketStatusOpen
+	}, "replica did not recover after duplicate and gap across reconnects")
+
+	if got := firstFromSeq.Load(); got != 1 {
+		t.Fatalf("expected first stream from_seq=1, got %d", got)
+	}
+	if got := secondFromSeq.Load(); got != 2 {
+		t.Fatalf("expected second stream from_seq=2, got %d", got)
+	}
+	if got := thirdFromSeq.Load(); got != 4 {
+		t.Fatalf("expected third stream from_seq=4 after snapshot recovery, got %d", got)
+	}
+	if snapshotCalls.Load() < 2 {
+		t.Fatalf("expected at least two snapshots (bootstrap + recovery), got %d", snapshotCalls.Load())
+	}
+}
+
+func TestReplicaIdleStreamTimeoutReconnectsAndAppliesEvent(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	var snapshotCalls atomic.Int32
+	var streamCalls atomic.Int32
+	var firstFromSeq atomic.Int64
+	var secondFromSeq atomic.Int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/snapshot":
+			snapshotCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(domain.SnapshotResponse{
+				LastSeq: 0,
+				Markets: map[string]domain.MarketState{testMarketID: {
+					MarketID: testMarketID,
+					Status:   domain.MarketStatusOpen,
+				}},
+			})
+		case "/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			fromSeq, _ := strconv.ParseInt(r.URL.Query().Get("from_seq"), 10, 64)
+			call := streamCalls.Add(1)
+			if call == 1 {
+				firstFromSeq.Store(fromSeq)
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+				<-r.Context().Done()
+				return
+			}
+			if call == 2 {
+				secondFromSeq.Store(fromSeq)
+				evt := domain.ReplicationEvent{
+					Seq:       1,
+					EventID:   "idle-timeout-1",
+					TsUnixMs:  time.Now().UnixMilli(),
+					EventType: domain.EventTypeMarketUpdated,
+					MarketID:  testMarketID,
+					Payload:   mustJSON(t, domain.MarketState{MarketID: testMarketID, Status: domain.MarketStatusOpen}),
+				}
+				data, _ := json.Marshal(evt)
+				_, _ = io.WriteString(w, "data: "+string(data)+"\n\n")
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	store, err := replica.NewStore(replica.InMemoryDSN(fmt.Sprintf("idle_timeout_reconnect_%d", time.Now().UnixNano())))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	svc, err := replica.NewService(store, replica.ServiceConfig{
+		ID:                "idle-timeout",
+		CoreBaseURL:       server.URL,
+		Logger:            logger,
+		ReconnectBackoff:  25 * time.Millisecond,
+		StreamIdleTimeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go svc.Start(ctx)
+
+	waitFor(t, 3*time.Second, func() bool {
+		return svc.LastAppliedSeq() >= 1
+	}, "replica did not reconnect and apply event after idle timeout")
+
+	if got := firstFromSeq.Load(); got != 1 {
+		t.Fatalf("expected first stream from_seq=1, got %d", got)
+	}
+	if got := secondFromSeq.Load(); got != 1 {
+		t.Fatalf("expected reconnect stream from_seq=1, got %d", got)
+	}
+	if snapshotCalls.Load() < 1 {
+		t.Fatalf("expected at least one snapshot call, got %d", snapshotCalls.Load())
+	}
+
+	status := svc.Status()
+	if status.LastError != "" {
+		t.Fatalf("expected last_error to clear after successful reconnect, got %q", status.LastError)
+	}
+}
+
 func TestReplicaRestartBootstrapsFromSnapshotAndConverges(t *testing.T) {
 	coreURL, shutdownCore := startCoreTestServer(t)
 	defer shutdownCore()

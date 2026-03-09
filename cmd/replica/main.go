@@ -29,12 +29,15 @@ func main() {
 	defer store.Close()
 
 	svc, err := replica.NewService(store, replica.ServiceConfig{
-		ID:                replicaID,
-		CoreBaseURL:       coreURL,
-		Logger:            logger,
-		ReconnectBackoff:  500 * time.Millisecond,
-		HeartbeatInterval: time.Duration(getEnvInt("REPLICA_HEARTBEAT_INTERVAL_MS", 2000)) * time.Millisecond,
-		HeartbeatTimeout:  time.Duration(getEnvInt("REPLICA_HEARTBEAT_TIMEOUT_MS", 2000)) * time.Millisecond,
+		ID:                  replicaID,
+		CoreBaseURL:         coreURL,
+		Logger:              logger,
+		ReconnectBackoff:    time.Duration(getEnvInt("REPLICA_RECONNECT_BACKOFF_INITIAL_MS", 500)) * time.Millisecond,
+		ReconnectBackoffMax: time.Duration(getEnvInt("REPLICA_RECONNECT_BACKOFF_MAX_MS", 5000)) * time.Millisecond,
+		SnapshotTimeout:     time.Duration(getEnvInt("REPLICA_SNAPSHOT_TIMEOUT_MS", 3000)) * time.Millisecond,
+		StreamIdleTimeout:   time.Duration(getEnvInt("REPLICA_STREAM_IDLE_TIMEOUT_MS", 45000)) * time.Millisecond,
+		HeartbeatInterval:   time.Duration(getEnvInt("REPLICA_HEARTBEAT_INTERVAL_MS", 2000)) * time.Millisecond,
+		HeartbeatTimeout:    time.Duration(getEnvInt("REPLICA_HEARTBEAT_TIMEOUT_MS", 2000)) * time.Millisecond,
 	})
 	if err != nil {
 		logger.Error("failed to init replica service", "error", err)

@@ -43,3 +43,10 @@ Capture repeat issues, root causes, and proven fixes for this codebase.
 - Root cause: assumption overlooked rowid behavior behind `INTEGER PRIMARY KEY`.
 - Fix: benchmark baseline first and add directional indexes only with measured wins.
 - Prevention: require benchmark evidence before adding indexes on primary-key `seq` in this repo.
+
+### 2026-03-08 - Stream EOF should not pollute replica `last_error`
+- Context: replica stream resilience hardening (`StreamIdleTimeout`, reconnect status).
+- Symptom: `/replica/status` could report `last_error="EOF"` even after successful reconnect/apply because routine stream closes were treated as failures.
+- Root cause: `consumeStream` returning `io.EOF` flowed through generic disconnect handling that always updated `last_error`.
+- Fix: treat `io.EOF` as a normal reconnect signal (log + backoff + reconnect) without setting `last_error`.
+- Prevention: reserve `last_error` for actionable failures (timeout, decode/validation, non-200 responses), not expected stream lifecycle events.
