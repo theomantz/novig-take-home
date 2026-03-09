@@ -16,6 +16,7 @@ The breaker logic is based on bet-flow signals (bet velocity and liability accel
 - [API Surface](#api-surface)
 - [Configuration](#configuration)
 - [Project Layout](#project-layout)
+- [AI & Tools](#ai--tools)
 
 ## Architecture Overview
 
@@ -347,3 +348,25 @@ curl -s "$R1/markets/$MID/history"
 - `internal/replica`: stream consumer + dedupe/checkpoint store + read APIs
 - `cmd/eventlog-bench/README.md`: canonical benchmark notes/results
 - `docs/benchmarks/event_log_seq_reads_run_2026-03-07.txt`: raw benchmark output snapshot
+- `docs/benchmarks/event_log_seq_reads.md`: benchmark notes/results
+
+## AI & Tools
+
+### Tools used
+
+- `ChatGPT Codex` for implementation iterations, refactors, tests, and documentation drafts.
+- GitHub pull-request review threads (human and `chatgpt-codex-connector`) for defect discovery and design feedback.
+- `nix develop`, `go test ./...`, `go vet ./...`, `go test -race ./...`, and `go run ./cmd/demo` for reproducible validation.
+- `gh` CLI for PR workflow and review-thread handling.
+
+### Where we disagreed (PR reviews + conversations)
+
+| Topic | Initial direction | Disagreement / feedback | Resolution |
+| --- | --- | --- | --- |
+| Core event persistence order ([#1](https://github.com/theomantz/novig-take-home/pull/1)) | Updated authoritative market state before writing replication event. | This can desynchronize replicas if insert fails after state mutation. | Changed to persist first, then mutate state; added test coverage for persist-failure path. |
+| SQLite DSN ownership ([#1](https://github.com/theomantz/novig-take-home/pull/1)) | Built `file:...mode=memory&cache=shared` DSNs inline in binaries. | Preferred centralizing DSN construction in store packages to avoid drift. | Added `InMemoryDSN(...)` helpers in core/replica packages and reused them in `cmd/*`. |
+| Extra `seq DESC` index ([#1](https://github.com/theomantz/novig-take-home/pull/1), [#5](https://github.com/theomantz/novig-take-home/pull/5)) | Possible early index addition for latest-seq reads. | Counterpoint was to avoid speculative indexing without evidence. | Benchmarked first; kept baseline schema after data showed `INTEGER PRIMARY KEY` was sufficient here. |
+| Replica liveness visibility ([#1](https://github.com/theomantz/novig-take-home/pull/1), [#7](https://github.com/theomantz/novig-take-home/pull/7)) | Initial delivery focused on replication correctness and convergence. | Needed explicit core-visible health signals when replicas disconnect/fall behind. | Added replica heartbeat reporting and `/replicas/status` liveness states (`healthy`/`stale`/`offline`). |
+| Equality + breaker readability ([#1](https://github.com/theomantz/novig-take-home/pull/1)) | Equality logic and breaker transition checks were harder to audit. | Requested moving equality onto domain state + tests, and flattening long/duplicated conditionals. | Moved to `MarketState.IsEqual(...)`, added completeness tests, and extracted helper functions for breaker transitions. |
+| Heartbeat duration validation ([#7](https://github.com/theomantz/novig-take-home/pull/7)) | Accepted negative heartbeat interval/timeouts from env. | Non-positive durations can panic ticker creation. | Defaulted non-positive values to safe defaults and added regression tests. |
+| Reconnect backoff overflow ([#9](https://github.com/theomantz/novig-take-home/pull/9)) | Float-based exponential backoff could overflow at high attempts. | Overflow can produce negative durations and reconnect hammering. | Replaced with overflow-safe capped doubling and added high-attempt cap test. |
